@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Envie enquetes para seus grupos do WhatsApp.">
+    <title>Enquetes no WhatsApp</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 2a9.5 9.5 0 0 0-8.22 14.27L2.4 21.6l5.46-1.3A9.5 9.5 0 1 0 12 2Z"/><path d="M8.4 7.8c.3-.7.62-.72.93-.73h.8c.2 0 .46.08.6.47l.9 2.15c.1.26.05.48-.13.72l-.7.87c-.18.2-.18.42-.03.67.7 1.2 1.68 2.15 2.9 2.82.23.13.43.1.6-.1l.94-1.12c.2-.24.44-.28.7-.17l2.04.96c.3.14.48.28.5.46.08.64-.18 1.57-.6 2.07-.62.73-1.55 1.1-2.48.95-2.12-.34-4.07-1.35-5.67-2.85-1.55-1.45-2.7-3.2-3.1-5.03-.2-.85.08-1.63.8-2.17Z"/></svg>
+        </div>
+        <div>
+          <p class="eyebrow">Ferramenta local</p>
+          <h1>Enquetes no WhatsApp</h1>
+          <p>Escolha um grupo, monte a pergunta e envie em poucos segundos.</p>
+        </div>
+      </header>
+
+      <section class="status-card card" aria-labelledby="status-title">
+        <div class="section-heading">
+          <div>
+            <p class="step">Conexão</p>
+            <h2 id="status-title">Status do WhatsApp</h2>
+          </div>
+          <div id="status-badge" class="status-badge connecting">
+            <span class="status-dot"></span>
+            <span>Conectando</span>
+          </div>
+        </div>
+
+        <div id="qr-panel" class="qr-panel" hidden>
+          <div class="qr-frame"><img id="qr-code" alt="QR Code para conectar ao WhatsApp"></div>
+          <div>
+            <h3>Escaneie com seu celular</h3>
+            <ol>
+              <li>Abra o WhatsApp no celular.</li>
+              <li>Vá em <strong>Configurações → Aparelhos conectados</strong>.</li>
+              <li>Toque em <strong>Conectar um aparelho</strong>.</li>
+            </ol>
+          </div>
+        </div>
+        <p id="connection-hint" class="connection-hint">Iniciando o navegador do WhatsApp Web…</p>
+      </section>
+
+      <form id="poll-form" class="card poll-card">
+        <div class="section-heading">
+          <div>
+            <p class="step">Nova enquete</p>
+            <h2>Configure sua enquete</h2>
+          </div>
+        </div>
+
+        <fieldset id="poll-fields" disabled>
+          <div class="field group-field">
+            <label for="group">Grupo</label>
+            <div class="inline-control">
+              <select id="group" name="groupId" required>
+                <option value="">Conecte o WhatsApp primeiro</option>
+              </select>
+              <button id="refresh-groups" class="button secondary" type="button">
+                <span aria-hidden="true">↻</span> Atualizar grupos
+              </button>
+            </div>
+            <small id="group-help">Os grupos aparecem quando a conexão estiver pronta.</small>
+          </div>
+
+          <div class="field">
+            <label for="question">Pergunta</label>
+            <input id="question" name="question" maxlength="255" placeholder="Ex.: Qual jogo vamos jogar hoje?" required>
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label>Opções</label>
+              <span id="option-count">2 opções</span>
+            </div>
+            <div id="options-list" class="options-list"></div>
+            <div class="option-actions">
+              <button id="add-option" class="button ghost" type="button">＋ Adicionar opção</button>
+              <button id="use-members" class="button ghost" type="button">♙ Usar membros do grupo</button>
+            </div>
+          </div>
+
+          <label class="checkbox-row" for="allow-multiple">
+            <input id="allow-multiple" name="allowMultipleAnswers" type="checkbox">
+            <span class="fake-checkbox" aria-hidden="true"></span>
+            <span>
+              <strong>Permitir múltiplas respostas</strong>
+              <small>Participantes poderão selecionar mais de uma opção.</small>
+            </span>
+          </label>
+
+          <button id="submit-button" class="button primary" type="submit">
+            <span class="button-label">Enviar enquete</span>
+            <span class="spinner" hidden></span>
+          </button>
+        </fieldset>
+      </form>
+
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+      <footer>Funciona localmente e envia apenas mediante sua confirmação.</footer>
+    </main>
+  </body>
+</html>
