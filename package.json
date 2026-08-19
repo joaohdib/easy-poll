@@ -1,8 +1,8 @@
 {
-  "name": "whatsapp-group-polls-mvp",
+  "name": "easypoll",
   "version": "1.0.0",
   "private": true,
-  "description": "MVP local para enviar enquetes a um grupo do WhatsApp",
+  "description": "EasyPoll — aplicativo local para criar enquetes em grupos do WhatsApp",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

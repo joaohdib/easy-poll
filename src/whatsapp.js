@@ -18,8 +18,12 @@ class WhatsAppService {
     this.qrDataUrl = null;
     this.lastError = null;
     this.initialized = false;
+    this.clientGeneration = 0;
+    this.createClient();
+  }
 
-    this.client = new Client({
+  createClient() {
+    const client = new Client({
       authStrategy: new LocalAuth({
         dataPath: path.join(process.cwd(), '.wwebjs_auth')
       }),
@@ -30,57 +34,68 @@ class WhatsAppService {
           : []
       }
     });
-
-    this.registerEvents();
+    this.client = client;
+    this.clientGeneration += 1;
+    this.registerEvents(client, this.clientGeneration);
   }
 
-  registerEvents() {
-    this.client.on('qr', async (qr) => {
+  registerEvents(client, generation) {
+    const isCurrentClient = () => this.client === client && this.clientGeneration === generation;
+
+    client.on('qr', async (qr) => {
+      if (!isCurrentClient()) return;
       this.status = CONNECTION_STATUS.WAITING_QR;
       this.lastError = null;
 
       try {
-        this.qrDataUrl = await QRCode.toDataURL(qr, {
+        const qrDataUrl = await QRCode.toDataURL(qr, {
           errorCorrectionLevel: 'M',
           margin: 2,
           width: 320
         });
+        if (isCurrentClient()) this.qrDataUrl = qrDataUrl;
       } catch (error) {
+        if (!isCurrentClient()) return;
         this.qrDataUrl = null;
         this.lastError = 'Não foi possível gerar a imagem do QR Code.';
         console.error('[WhatsApp] Erro ao gerar QR Code:', error.message);
       }
     });
 
-    this.client.on('authenticated', () => {
+    client.on('authenticated', () => {
+      if (!isCurrentClient()) return;
       this.status = CONNECTION_STATUS.CONNECTING;
       this.qrDataUrl = null;
       this.lastError = null;
       console.log('[WhatsApp] Sessão autenticada. Aguardando ficar pronta...');
     });
 
-    this.client.on('ready', () => {
+    client.on('ready', () => {
+      if (!isCurrentClient()) return;
       this.status = CONNECTION_STATUS.CONNECTED;
       this.qrDataUrl = null;
       this.lastError = null;
       console.log('[WhatsApp] Cliente conectado e pronto.');
     });
 
-    this.client.on('auth_failure', (message) => {
+    client.on('auth_failure', (message) => {
+      if (!isCurrentClient()) return;
       this.status = CONNECTION_STATUS.AUTH_FAILURE;
       this.qrDataUrl = null;
       this.lastError = 'Falha ao autenticar a sessão do WhatsApp.';
       console.error('[WhatsApp] Falha de autenticação:', message);
     });
 
-    this.client.on('disconnected', (reason) => {
+    client.on('disconnected', (reason) => {
+      if (!isCurrentClient()) return;
       this.status = CONNECTION_STATUS.DISCONNECTED;
       this.qrDataUrl = null;
       this.lastError = `WhatsApp desconectado${reason ? `: ${reason}` : '.'}`;
       console.warn('[WhatsApp] Desconectado:', reason);
     });
 
-    this.client.on('change_state', (state) => {
+    client.on('change_state', (state) => {
+      if (!isCurrentClient()) return;
       if (this.status !== CONNECTION_STATUS.CONNECTED) {
         this.status = CONNECTION_STATUS.CONNECTING;
       }
@@ -93,7 +108,9 @@ class WhatsAppService {
     this.initialized = true;
     this.status = CONNECTION_STATUS.CONNECTING;
 
-    this.client.initialize().catch((error) => {
+    const client = this.client;
+    client.initialize().catch((error) => {
+      if (this.client !== client) return;
       this.status = CONNECTION_STATUS.DISCONNECTED;
       this.lastError = 'Não foi possível iniciar o WhatsApp Web.';
       console.error('[WhatsApp] Erro na inicialização:', error);
@@ -119,6 +136,30 @@ class WhatsAppService {
       error.code = 'WHATSAPP_NOT_CONNECTED';
       throw error;
     }
+  }
+
+  async logout() {
+    this.ensureConnected();
+    const client = this.client;
+    this.status = CONNECTION_STATUS.CONNECTING;
+    this.qrDataUrl = null;
+    this.lastError = null;
+
+    try {
+      // logout() encerra o WhatsApp Web e o LocalAuth remove os dados da sessão.
+      await client.logout();
+    } catch (cause) {
+      this.status = CONNECTION_STATUS.DISCONNECTED;
+      this.lastError = 'Não foi possível desconectar a sessão do WhatsApp.';
+      const error = new Error(this.lastError, { cause });
+      error.code = 'WHATSAPP_LOGOUT_FAILED';
+      throw error;
+    }
+
+    this.initialized = false;
+    this.createClient();
+    this.initialize();
+    return this.getStatus();
   }
 
   async getGroups() {
@@ -150,7 +191,7 @@ class WhatsAppService {
       .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }
 
-  async getGroupMembers(groupId, limit = 12) {
+  async getGroupMembers(groupId) {
     this.ensureConnected();
 
     const groups = await this.getGroups();
@@ -160,7 +201,7 @@ class WhatsAppService {
       throw error;
     }
 
-    const result = await this.client.pupPage.evaluate(async ({ groupId, limit }) => {
+    const result = await this.client.pupPage.evaluate(async (groupId) => {
       const WidFactory = window.require('WAWebWidFactory');
       const collections = window.require('WAWebCollections');
       const contactGetters = window.require('WAWebContactGetters');
@@ -184,26 +225,34 @@ class WhatsAppService {
         participants = chat?.groupMetadata?.participants?.serialize?.() || [];
       }
 
-      const names = await Promise.all(participants.slice(0, limit).map(async (participant, index) => {
+      const members = (await Promise.all(participants.map(async (participant, index) => {
         try {
           const participantId = participant.id;
           const serializedId = participantId?._serialized || participantId?.toString?.();
+          if (!serializedId) return null;
           const contact = collections.Contact.get(serializedId)
             || await collections.Contact.find(participantId).catch(() => null);
-
-          if (!contact) return `Participante ${index + 1}`;
-          return contactGetters.getName(contact)
-            || contactGetters.getPushname(contact)
-            || contactGetters.getShortName(contact)
+          const digits = String(serializedId).split('@')[0].replace(/\D/g, '');
+          // whatsapp-web.js 1.34.7 define pushname como o nome público
+          // configurado pelo próprio contato. `name` é o nome salvo localmente.
+          const name = (contact && (contactGetters.getPushname(contact)
             || contactGetters.getVerifiedName(contact)
-            || `Participante ${index + 1}`;
-        } catch (_error) {
-          return `Participante ${index + 1}`;
-        }
-      }));
+            || contactGetters.getName(contact)
+            || contactGetters.getShortName(contact)))
+            || (digits ? `Contato •••• ${digits.slice(-4)}` : `Participante ${index + 1}`);
 
-      return { names, totalMembers: participants.length, updateTimedOut };
-    }, { groupId, limit });
+          return {
+            id: serializedId,
+            name: String(name),
+            numberHint: digits ? `•••• ${digits.slice(-4)}` : null
+          };
+        } catch (_error) {
+          return null;
+        }
+      }))).filter(Boolean);
+
+      return { members, totalMembers: participants.length, updateTimedOut };
+    }, groupId);
 
     if (!result.totalMembers) {
       const error = new Error(result.updateTimedOut
@@ -213,22 +262,52 @@ class WhatsAppService {
       throw error;
     }
 
-    const usedNames = new Set();
-    const members = result.names.map((rawName, index) => {
-      const baseName = String(rawName || `Participante ${index + 1}`).trim().slice(0, 94)
-        || `Participante ${index + 1}`;
-      let name = baseName;
-      let suffix = 2;
-
-      while (usedNames.has(name.toLocaleLowerCase('pt-BR'))) {
-        name = `${baseName} (${suffix})`.slice(0, 100);
-        suffix += 1;
-      }
-      usedNames.add(name.toLocaleLowerCase('pt-BR'));
-      return name;
-    });
+    const members = result.members.map((member, index) => ({
+      id: String(member.id),
+      name: String(member.name || `Participante ${index + 1}`).trim().slice(0, 100)
+        || `Participante ${index + 1}`,
+      numberHint: member.numberHint || null,
+      profilePicUrl: null
+    }));
 
     return { members, totalMembers: result.totalMembers };
+  }
+
+  async getGroupMemberProfilePic(groupId, memberId) {
+    this.ensureConnected();
+
+    const isMember = await this.client.pupPage.evaluate(({ groupId, memberId }) => {
+      try {
+        const WidFactory = window.require('WAWebWidFactory');
+        const collections = window.require('WAWebCollections');
+        const chat = collections.Chat.get(WidFactory.createWid(groupId));
+        const participants = chat?.groupMetadata?.participants?.serialize?.() || [];
+
+        return participants.some((participant) => {
+          const id = participant.id?._serialized || participant.id?.toString?.();
+          return id === memberId;
+        });
+      } catch (_error) {
+        return false;
+      }
+    }, { groupId, memberId });
+
+    if (!isMember) {
+      const error = new Error('Membro não encontrado neste grupo.');
+      error.code = 'GROUP_MEMBER_NOT_FOUND';
+      throw error;
+    }
+
+    try {
+      const profilePicUrl = await Promise.race([
+        this.client.getProfilePicUrl(memberId),
+        new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+      ]);
+      return { profilePicUrl: profilePicUrl || null };
+    } catch (_error) {
+      // Ausência, privacidade e falhas pontuais de foto usam o avatar local.
+      return { profilePicUrl: null };
+    }
   }
 
   async sendPoll({ groupId, question, options, allowMultipleAnswers }) {

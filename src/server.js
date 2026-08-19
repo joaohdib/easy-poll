@@ -39,7 +39,35 @@ app.get('/api/groups/:groupId/members', async (request, response, next) => {
       return response.status(400).json({ error: 'Selecione um grupo válido.' });
     }
 
-    return response.json(await whatsapp.getGroupMembers(groupId, 12));
+    return response.json(await whatsapp.getGroupMembers(groupId));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get('/api/groups/:groupId/members/:memberId/profile-picture', async (request, response, next) => {
+  try {
+    const groupId = request.params.groupId?.trim();
+    const memberId = request.params.memberId?.trim();
+    if (!groupId?.endsWith('@g.us') || !memberId || !/@(?:c\.us|lid)$/.test(memberId)) {
+      return response.status(400).json({ error: 'Grupo ou membro inválido.' });
+    }
+
+    response.set('Cache-Control', 'no-store');
+    return response.json(await whatsapp.getGroupMemberProfilePic(groupId, memberId));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/whatsapp/logout', async (_request, response, next) => {
+  try {
+    const status = await whatsapp.logout();
+    return response.json({
+      success: true,
+      message: 'WhatsApp desconectado. Escaneie o próximo QR Code para conectar novamente.',
+      status
+    });
   } catch (error) {
     return next(error);
   }
@@ -71,7 +99,9 @@ app.use((error, _request, response, _next) => {
   const knownErrors = {
     WHATSAPP_NOT_CONNECTED: 503,
     GROUP_NOT_FOUND: 404,
-    GROUP_MEMBERS_UNAVAILABLE: 504
+    GROUP_MEMBERS_UNAVAILABLE: 504,
+    GROUP_MEMBER_NOT_FOUND: 404,
+    WHATSAPP_LOGOUT_FAILED: 502
   };
   const status = knownErrors[error.code] || 500;
 

@@ -1,10 +1,33 @@
+# Dependências e relatórios locais
 node_modules/
+coverage/
+.nyc_output/
+
+# Sessão e cache locais do WhatsApp Web — nunca versionar
 .wwebjs_auth/
+.wwebjs_auth*/
 .wwebjs_cache/
+.wwebjs_cache*/
+
+# Configuração local e credenciais
 .env
 .env.*
 !.env.example
+.npmrc
+*.local
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs
 npm-debug.log*
+*.log
+logs/
+
+# Editores e sistema operacional
+.idea/
+.vscode/
+*.iml
 .DS_Store
 Thumbs.db
-

@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Envie enquetes para seus grupos do WhatsApp.">
-    <title>Enquetes no WhatsApp</title>
+    <meta name="description" content="EasyPoll — enquetes rápidas para seus grupos do WhatsApp.">
+    <title>EasyPoll — Enquetes no WhatsApp</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
@@ -12,12 +12,12 @@
     <main class="shell">
       <header class="hero">
         <div class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M12 2a9.5 9.5 0 0 0-8.22 14.27L2.4 21.6l5.46-1.3A9.5 9.5 0 1 0 12 2Z"/><path d="M8.4 7.8c.3-.7.62-.72.93-.73h.8c.2 0 .46.08.6.47l.9 2.15c.1.26.05.48-.13.72l-.7.87c-.18.2-.18.42-.03.67.7 1.2 1.68 2.15 2.9 2.82.23.13.43.1.6-.1l.94-1.12c.2-.24.44-.28.7-.17l2.04.96c.3.14.48.28.5.46.08.64-.18 1.57-.6 2.07-.62.73-1.55 1.1-2.48.95-2.12-.34-4.07-1.35-5.67-2.85-1.55-1.45-2.7-3.2-3.1-5.03-.2-.85.08-1.63.8-2.17Z"/></svg>
+          <svg viewBox="0 0 24 24"><path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-4.5 3v-3H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/><path d="m7 10 1.6 1.6L12 8.2M14 9h4M14 13h4"/></svg>
         </div>
         <div>
-          <p class="eyebrow">Ferramenta local</p>
-          <h1>Enquetes no WhatsApp</h1>
-          <p>Escolha um grupo, monte a pergunta e envie em poucos segundos.</p>
+          <p class="eyebrow">Enquetes no WhatsApp</p>
+          <h1>EasyPoll</h1>
+          <p>Enquetes rápidas para seus grupos.</p>
         </div>
       </header>
 
@@ -27,9 +27,12 @@
             <p class="step">Conexão</p>
             <h2 id="status-title">Status do WhatsApp</h2>
           </div>
-          <div id="status-badge" class="status-badge connecting">
-            <span class="status-dot"></span>
-            <span>Conectando</span>
+          <div class="status-actions">
+            <div id="status-badge" class="status-badge connecting">
+              <span class="status-dot"></span>
+              <span>Conectando</span>
+            </div>
+            <button id="disconnect-whatsapp" class="disconnect-button" type="button" hidden>Desconectar</button>
           </div>
         </div>
 
@@ -58,13 +61,21 @@
         <fieldset id="poll-fields" disabled>
           <div class="field group-field">
             <label for="group">Grupo</label>
-            <div class="inline-control">
-              <select id="group" name="groupId" required>
-                <option value="">Conecte o WhatsApp primeiro</option>
-              </select>
-              <button id="refresh-groups" class="button secondary" type="button">
-                <span aria-hidden="true">↻</span> Atualizar grupos
-              </button>
+            <select id="group" class="sr-only" name="groupId" required tabindex="-1" aria-hidden="true">
+              <option value="">Conecte o WhatsApp primeiro</option>
+            </select>
+            <div class="group-picker">
+              <div class="group-toolbar">
+                <label class="group-search">
+                  <span class="sr-only">Buscar grupo</span>
+                  <input id="group-search" type="search" placeholder="Buscar grupo..." autocomplete="off">
+                </label>
+                <button id="refresh-groups" class="button secondary refresh-button" type="button" aria-label="Atualizar grupos">
+                  <span aria-hidden="true">↻</span><span>Atualizar</span>
+                </button>
+              </div>
+              <div id="group-list" class="group-list" role="listbox" aria-label="Grupos do WhatsApp"></div>
+              <p id="group-empty" class="group-empty" hidden>Nenhum grupo encontrado nessa busca.</p>
             </div>
             <small id="group-help">Os grupos aparecem quando a conexão estiver pronta.</small>
           </div>
@@ -82,7 +93,8 @@
             <div id="options-list" class="options-list"></div>
             <div class="option-actions">
               <button id="add-option" class="button ghost" type="button">＋ Adicionar opção</button>
-              <button id="use-members" class="button ghost" type="button">♙ Usar membros do grupo</button>
+              <button id="bulk-options" class="button ghost" type="button">▤ Colar várias opções</button>
+              <button id="use-members" class="button ghost" type="button">♙ Selecionar membros</button>
             </div>
           </div>
 
@@ -99,8 +111,69 @@
             <span class="button-label">Enviar enquete</span>
             <span class="spinner" hidden></span>
           </button>
+          <button id="clear-form" class="button clear-form" type="button">Limpar formulário</button>
         </fieldset>
       </form>
+
+      <dialog id="bulk-dialog" class="app-dialog bulk-dialog" aria-labelledby="bulk-dialog-title">
+        <form id="bulk-form" method="dialog" class="dialog-shell">
+          <div class="dialog-header">
+            <div>
+              <p class="step">Atalho de produtividade</p>
+              <h2 id="bulk-dialog-title">Colar várias opções</h2>
+            </div>
+            <button id="close-bulk-dialog" class="dialog-close" type="button" aria-label="Fechar">×</button>
+          </div>
+          <p class="dialog-description">Use uma opção por linha. Em uma única linha, vírgulas e ponto e vírgulas também são aceitos.</p>
+          <label class="bulk-text-label" for="bulk-text">Opções</label>
+          <textarea id="bulk-text" rows="8" placeholder="Minecraft&#10;Valorant&#10;Gartic&#10;Stop"></textarea>
+          <fieldset id="bulk-mode" class="bulk-mode" hidden>
+            <legend>Já existem opções preenchidas</legend>
+            <label><input type="radio" name="bulkMode" value="replace" checked> Substituir opções atuais</label>
+            <label><input type="radio" name="bulkMode" value="append"> Adicionar às opções atuais</label>
+          </fieldset>
+          <p id="bulk-feedback" class="bulk-feedback" role="alert" hidden></p>
+          <div class="dialog-actions">
+            <button id="cancel-bulk" class="button secondary" type="button">Cancelar</button>
+            <button class="button primary dialog-primary" type="submit">Importar opções</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="member-dialog" class="app-dialog member-dialog" aria-labelledby="member-dialog-title">
+        <div class="member-dialog-shell">
+          <div class="member-dialog-header">
+            <div>
+              <p class="step">Opções da enquete</p>
+              <h2 id="member-dialog-title">Selecionar membros</h2>
+            </div>
+            <button id="close-member-dialog" class="dialog-close" type="button" aria-label="Fechar">×</button>
+          </div>
+
+          <div id="member-loading" class="member-loading" hidden>Carregando membros…</div>
+          <div id="member-picker" hidden>
+            <div class="member-toolbar">
+              <label class="member-search">
+                <span class="sr-only">Buscar por nome</span>
+                <input id="member-search" type="search" placeholder="Buscar por nome…" autocomplete="off">
+              </label>
+              <strong id="member-selected-count" class="selection-count">0/12 selecionados</strong>
+            </div>
+            <div class="member-quick-actions">
+              <button id="random-members" class="button secondary small-button" type="button">Selecionar 12 aleatórios</button>
+              <button id="clear-members" class="button ghost small-button" type="button">Limpar seleção</button>
+            </div>
+            <p id="member-limit-message" class="member-limit-message" role="status" hidden>O limite de 12 membros foi atingido.</p>
+            <div id="member-list" class="member-list" role="list"></div>
+            <p id="member-empty" class="member-empty" hidden>Nenhum membro encontrado nessa busca.</p>
+          </div>
+
+          <div class="member-dialog-actions">
+            <button id="cancel-members" class="button secondary" type="button">Cancelar</button>
+            <button id="apply-members" class="button primary dialog-primary" type="button" disabled>Usar selecionados</button>
+          </div>
+        </div>
+      </dialog>
 
       <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
       <footer>Funciona localmente e envia apenas mediante sua confirmação.</footer>
