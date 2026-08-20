@@ -37,9 +37,13 @@ Estado atualizado em 20/08/2026.
 - Tratamento de desconexão sem derrubar o servidor.
 - Recuperação automática limitada quando a inicialização é interrompida por uma navegação do WhatsApp Web, preservando o `LocalAuth`.
 - Área **Enquetes anteriores — Experimental**:
+  - mede as mensagens disponíveis e permite tentar preparar o histórico antes da análise;
+  - usa `WAWebChatLoadMessages.loadEarlierMsgs`, o mecanismo interno de `Chat#fetchMessages()` 1.34.7;
+  - mostra contagens, estabiliza após três tentativas sem crescimento e possui timeout/cancelamento;
+  - não envia mensagens comuns ao frontend nem persiste o histórico;
   - executa somente mediante clique;
   - usa o grupo atualmente selecionado;
-  - permite solicitar 100, 500, 1000 ou um limite personalizado de até 5000 mensagens;
+  - permite solicitar 100, 500, 1000 ou um limite personalizado de até 15000 mensagens;
   - identifica exclusivamente mensagens do tipo `poll_creation`;
   - mostra pergunta, data, autor, opções e votos disponíveis;
   - apresenta falhas de votos individualmente, sem interromper as demais enquetes;
@@ -93,6 +97,9 @@ O limite solicitado é um máximo. O WhatsApp Web pode disponibilizar uma quanti
 - `POST /api/whatsapp/logout` — encerra a sessão local e prepara uma nova conexão por QR Code.
 - `POST /api/polls` — valida e envia uma enquete.
 - `POST /api/groups/:groupId/polls/scan` — analisa o histórico disponível e retorna somente dados de enquetes, sem persistência.
+- `GET /api/groups/:groupId/history/status` — retorna estado e contagens da preparação, sem mensagens.
+- `POST /api/groups/:groupId/history/prepare` — inicia a preparação experimental do grupo.
+- `DELETE /api/groups/:groupId/history/prepare` — solicita o cancelamento da preparação.
 
 Exemplo do corpo de envio:
 
@@ -132,13 +139,14 @@ Exemplo do corpo da análise experimental:
 - Podem ser selecionados no máximo 12 membros por causa do limite definido para as opções da enquete.
 - O retorno da biblioteca pode não conter o ID da mensagem mesmo quando a enquete foi enviada; uma operação sem exceção é tratada como sucesso.
 - A análise de histórico nunca roda automaticamente e impede duas análises simultâneas no mesmo cliente.
-- O endpoint aceita limites de 1 a 5000 mensagens; o padrão é 1000.
+- O endpoint aceita limites de 1 a 15000 mensagens; o padrão é 1000.
 - A interface interrompe a espera após três minutos. O backend pode ainda estar concluindo a operação e continuará rejeitando uma segunda análise simultânea.
 - `Chat#fetchMessages()` pode retornar menos mensagens que o limite solicitado quando não há mais histórico disponível para a sessão.
 - `Client#getChatById()` apresentou uma falha de serialização (`r: r`) com o WhatsApp Web atual. A análise usa uma instância mínima de `Chat`, mantendo o `Chat#fetchMessages()` da versão instalada sem serializar o modelo completo do grupo.
 - Os IDs serializados das enquetes podem perder a propriedade `_serialized` ao atravessar o Puppeteer. O EasyPoll os recupera diretamente dos modelos carregados no WhatsApp Web.
 - `Client#getPollVotes()` também perdeu esse ID durante uma segunda serialização. A análise replica a consulta da versão 1.34.7 a `WAWebPollsVotesSchema`, passando diretamente o ID já recuperado e sem fazer scraping adicional.
 - Em teste real, 500 mensagens disponíveis produziram 10 enquetes reconhecidas, com perguntas, opções, datas e autores. Em uma sessão posterior, pedidos de 100 e 500 mensagens retornaram somente 15 mensagens e uma enquete, demonstrando que a disponibilidade varia por sessão.
+- Em validação da preparação experimental, um grupo passou de 1 para 1001 mensagens disponíveis após 20 páginas de 50; o scanner analisou 1000 mensagens e encontrou 25 enquetes, confirmando que `loadEarlierMsgs` pode induzir mais histórico em algumas sessões.
 - A recuperação efetiva de votos reais ainda precisa ser confirmada depois do último ajuste em `WAWebPollsVotesSchema`. Uma lista vazia pode significar que nenhum voto foi disponibilizado para aquela enquete.
 - Os logs da análise incluem somente limite, ID do grupo, contagem por tipo, IDs de enquetes e erros técnicos; não incluem conteúdo de mensagens comuns.
 - `whatsapp-web.js` é uma integração não oficial baseada no WhatsApp Web. Alterações internas do WhatsApp podem afetar o funcionamento.

@@ -5,7 +5,9 @@ const express = require('express');
 const {
   WhatsAppService,
   POLL_SCAN_DEFAULT_LIMIT,
-  POLL_SCAN_MAX_LIMIT
+  POLL_SCAN_MAX_LIMIT,
+  HISTORY_PREPARE_DEFAULT_LIMIT,
+  HISTORY_PREPARE_MAX_LIMIT
 } = require('./whatsapp');
 
 const app = express();
@@ -110,6 +112,43 @@ app.post('/api/groups/:groupId/polls/scan', async (request, response, next) => {
   }
 });
 
+app.get('/api/groups/:groupId/history/status', async (request, response, next) => {
+  try {
+    const validation = validateGroupId(request.params.groupId);
+    if (validation.error) return response.status(400).json({ error: validation.error });
+    response.set('Cache-Control', 'no-store');
+    return response.json(await whatsapp.getGroupHistoryStatus(validation.value));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/groups/:groupId/history/prepare', async (request, response, next) => {
+  try {
+    const validation = validateHistoryPrepare(request.params.groupId, request.body);
+    if (validation.error) return response.status(400).json({ error: validation.error });
+    response.set('Cache-Control', 'no-store');
+    const status = await whatsapp.startGroupHistoryPreparation(
+      validation.value.groupId,
+      validation.value.target
+    );
+    return response.status(202).json(status);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.delete('/api/groups/:groupId/history/prepare', (request, response, next) => {
+  try {
+    const validation = validateGroupId(request.params.groupId);
+    if (validation.error) return response.status(400).json({ error: validation.error });
+    response.set('Cache-Control', 'no-store');
+    return response.json(whatsapp.cancelGroupHistoryPreparation(validation.value));
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.use('/api', (_request, response) => {
   response.status(404).json({ error: 'Endpoint não encontrado.' });
 });
@@ -122,7 +161,8 @@ app.use((error, _request, response, _next) => {
     GROUP_MEMBER_NOT_FOUND: 404,
     WHATSAPP_LOGOUT_FAILED: 502,
     POLL_SCAN_BUSY: 409,
-    POLL_MESSAGES_FETCH_FAILED: 502
+    POLL_MESSAGES_FETCH_FAILED: 502,
+    HISTORY_PREPARE_BUSY: 409
   };
   const status = knownErrors[error.code] || 500;
 
@@ -175,6 +215,26 @@ function validatePollScan(groupIdValue, body) {
   return { value: { groupId, limit } };
 }
 
+function validateGroupId(groupIdValue) {
+  const groupId = typeof groupIdValue === 'string' ? groupIdValue.trim() : '';
+  return groupId.endsWith('@g.us')
+    ? { value: groupId }
+    : { error: 'Selecione um grupo válido.' };
+}
+
+function validateHistoryPrepare(groupIdValue, body) {
+  const group = validateGroupId(groupIdValue);
+  if (group.error) return group;
+  if (body !== undefined && (body === null || typeof body !== 'object' || Array.isArray(body))) {
+    return { error: 'Corpo da solicitação inválido.' };
+  }
+  const target = Number(body?.target ?? HISTORY_PREPARE_DEFAULT_LIMIT);
+  if (!Number.isInteger(target) || target < 1 || target > HISTORY_PREPARE_MAX_LIMIT) {
+    return { error: `O alvo deve ser um número inteiro entre 1 e ${HISTORY_PREPARE_MAX_LIMIT}.` };
+  }
+  return { value: { groupId: group.value, target } };
+}
+
 const server = app.listen(port, () => {
   console.log(`Aplicação disponível em http://localhost:${port}`);
   whatsapp.initialize();
@@ -193,4 +253,4 @@ async function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-module.exports = { app, validatePoll, validatePollScan };
+module.exports = { app, validatePoll, validatePollScan, validateHistoryPrepare };

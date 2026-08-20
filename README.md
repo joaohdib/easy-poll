@@ -51,6 +51,15 @@ O backend somente envia ao grupo selecionado e apenas depois desse clique. Não 
 - `GET /api/groups/:groupId/members/:memberId/profile-picture` — URL temporária da foto, quando a privacidade do contato permitir
 - `POST /api/whatsapp/logout` — encerra a sessão local e reinicia o cliente para exibir um novo QR Code
 - `POST /api/polls` — valida e envia uma enquete
+- `POST /api/groups/:groupId/polls/scan` — analisa as enquetes no histórico disponível
+- `GET /api/groups/:groupId/history/status` — mede e acompanha somente a contagem disponível na sessão
+- `POST /api/groups/:groupId/history/prepare` — inicia a preparação experimental (`{"target": 1000}`)
+- `DELETE /api/groups/:groupId/history/prepare` — solicita o cancelamento da preparação
+
+Antes da análise, a área experimental pode tentar preparar o histórico do grupo com
+o mecanismo interno usado por `Chat#fetchMessages()` na versão 1.34.7. Ela mostra
+contagens reais e nunca afirma que o histórico está completo. Veja o
+[diagnóstico técnico](docs/history-preparation.md).
 
 ## Limitações e aviso importante
 

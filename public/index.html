@@ -130,6 +130,27 @@
             <span>Grupo atual</span>
             <strong id="history-group-name">Selecione um grupo acima</strong>
           </div>
+          <div class="history-prepare-panel">
+            <div class="history-prepare-heading">
+              <div>
+                <strong>Histórico do grupo</strong>
+                <small>O WhatsApp Web ainda pode estar sincronizando mensagens deste grupo.</small>
+              </div>
+              <span class="experimental-badge">Experimental</span>
+            </div>
+            <div id="history-prepare-metric" class="history-prepare-metric" aria-live="polite">
+              <strong>—</strong>
+              <span>mensagens disponíveis</span>
+            </div>
+            <p id="history-prepare-detail" class="history-prepare-detail">Selecione um grupo para medir o histórico disponível nesta sessão.</p>
+            <div class="history-prepare-actions">
+              <button id="prepare-history" class="button secondary" type="button">
+                <span class="button-label">Preparar histórico</span>
+                <span class="spinner dark" hidden></span>
+              </button>
+              <button id="cancel-history" class="button history-cancel-button" type="button" hidden>Cancelar</button>
+            </div>
+          </div>
           <div class="field history-limit-field">
             <label for="history-limit">Mensagens a analisar</label>
             <div class="history-presets" aria-label="Limites de mensagens">
@@ -137,8 +158,8 @@
               <button class="button secondary history-preset" type="button" data-limit="500">500</button>
               <button class="button secondary history-preset active" type="button" data-limit="1000">1000</button>
             </div>
-            <input id="history-limit" type="number" min="1" max="5000" step="1" value="1000">
-            <small>Limite máximo nesta etapa experimental: 5000 mensagens.</small>
+            <input id="history-limit" type="number" min="1" max="15000" step="1" value="1000">
+            <small>Limite máximo nesta etapa experimental: 15000 mensagens.</small>
           </div>
           <button id="scan-polls" class="button primary history-scan-button" type="button">
             <span class="button-label">Analisar enquetes</span>

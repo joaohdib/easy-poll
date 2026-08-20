@@ -24,7 +24,11 @@ const state = {
   favoriteGroupIds: new Set(),
   scanningPolls: false,
   pollScanRequestId: 0,
-  pollScanResult: null
+  pollScanResult: null,
+  historyGroupId: null,
+  historyPreparing: false,
+  historyStatusRequestId: 0,
+  historyPollTimer: null
 };
 
 const elements = {
@@ -76,6 +80,12 @@ const elements = {
   historyGroupName: document.querySelector('#history-group-name'),
   historyLimit: document.querySelector('#history-limit'),
   historyPresets: [...document.querySelectorAll('.history-preset')],
+  prepareHistory: document.querySelector('#prepare-history'),
+  prepareHistoryLabel: document.querySelector('#prepare-history .button-label'),
+  prepareHistorySpinner: document.querySelector('#prepare-history .spinner'),
+  cancelHistory: document.querySelector('#cancel-history'),
+  historyPrepareMetric: document.querySelector('#history-prepare-metric strong'),
+  historyPrepareDetail: document.querySelector('#history-prepare-detail'),
   scanPolls: document.querySelector('#scan-polls'),
   scanPollsLabel: document.querySelector('#scan-polls .button-label'),
   scanPollsSpinner: document.querySelector('#scan-polls .spinner'),
@@ -221,6 +231,10 @@ function hideQrCode() {
 }
 
 function clearLoadedGroups() {
+  clearHistoryPollTimer();
+  state.historyStatusRequestId += 1;
+  state.historyGroupId = null;
+  setHistoryPreparing(false);
   state.groups = [];
   elements.group.innerHTML = '<option value="">Conecte o WhatsApp primeiro</option>';
   elements.groupList.innerHTML = '';
@@ -312,7 +326,117 @@ function selectGroup(groupId, persist = true) {
 function syncPollHistoryGroup() {
   const group = state.groups.find((candidate) => candidate.id === elements.group.value);
   elements.historyGroupName.textContent = group?.name || 'Selecione um grupo acima';
-  elements.scanPolls.disabled = state.scanningPolls || state.status !== 'connected' || !group;
+  elements.scanPolls.disabled = state.scanningPolls || state.historyPreparing
+    || state.status !== 'connected' || !group;
+  elements.prepareHistory.disabled = state.historyPreparing || state.scanningPolls
+    || state.status !== 'connected' || !group;
+}
+
+function clearHistoryPollTimer() {
+  if (state.historyPollTimer) clearTimeout(state.historyPollTimer);
+  state.historyPollTimer = null;
+}
+
+function setHistoryPreparing(preparing) {
+  state.historyPreparing = preparing;
+  elements.prepareHistoryLabel.textContent = preparing ? 'Carregando mensagens antigas…' : 'Preparar histórico';
+  elements.prepareHistorySpinner.hidden = !preparing;
+  elements.cancelHistory.hidden = !preparing;
+  elements.historyLimit.disabled = preparing || state.scanningPolls;
+  elements.historyPresets.forEach((button) => { button.disabled = preparing || state.scanningPolls; });
+  syncPollHistoryGroup();
+}
+
+function renderHistoryPreparation(data) {
+  if (!data || data.groupId !== elements.group.value) return;
+  const count = Number.isInteger(data.messagesAvailable) ? data.messagesAvailable : '—';
+  elements.historyPrepareMetric.textContent = String(count);
+  const terminalCopy = {
+    completed: `✓ Preparação concluída. ${count} mensagens disponíveis nesta sessão.`,
+    stabilized: `✓ Histórico estabilizado por agora. ${count} mensagens disponíveis nesta sessão.`,
+    cancelled: `Preparação cancelada. ${count} mensagens continuam disponíveis nesta sessão.`,
+    timeout: `Tempo limite atingido. ${count} mensagens disponíveis nesta sessão.`,
+    error: data.error || 'Não foi possível preparar mais histórico.'
+  };
+  elements.historyPrepareDetail.textContent = data.status === 'preparing'
+    ? `⟳ ${data.detail || 'Buscando mensagens anteriores…'} Tentativa ${data.attempts || 0}.`
+    : terminalCopy[data.status] || data.detail || 'Histórico disponível nesta sessão.';
+  setHistoryPreparing(data.status === 'preparing');
+}
+
+async function loadHistoryPreparationStatus(groupId, poll = false) {
+  if (!groupId || state.status !== 'connected') return;
+  const requestId = poll ? state.historyStatusRequestId : ++state.historyStatusRequestId;
+  try {
+    const data = await fetchJson(`/api/groups/${encodeURIComponent(groupId)}/history/status`);
+    if (requestId !== state.historyStatusRequestId || elements.group.value !== groupId) return;
+    renderHistoryPreparation(data);
+    if (data.status === 'preparing') {
+      clearHistoryPollTimer();
+      state.historyPollTimer = setTimeout(() => loadHistoryPreparationStatus(groupId, true), 1500);
+    }
+  } catch (error) {
+    if (requestId !== state.historyStatusRequestId || elements.group.value !== groupId) return;
+    setHistoryPreparing(false);
+    elements.historyPrepareDetail.textContent = error.message;
+  }
+}
+
+async function prepareGroupHistory() {
+  const groupId = elements.group.value;
+  const target = Number(elements.historyLimit.value);
+  if (!groupId || state.historyPreparing) return;
+  if (!Number.isInteger(target) || target < 1 || target > 15000) {
+    return showToast('Informe um alvo inteiro entre 1 e 15000 mensagens.', true);
+  }
+  const requestId = ++state.historyStatusRequestId;
+  setHistoryPreparing(true);
+  elements.historyPrepareDetail.textContent = '⟳ Iniciando a preparação do histórico…';
+  try {
+    const data = await fetchJson(`/api/groups/${encodeURIComponent(groupId)}/history/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target })
+    });
+    if (requestId !== state.historyStatusRequestId || elements.group.value !== groupId) return;
+    renderHistoryPreparation(data);
+    clearHistoryPollTimer();
+    state.historyPollTimer = setTimeout(() => loadHistoryPreparationStatus(groupId, true), 1000);
+  } catch (error) {
+    if (requestId !== state.historyStatusRequestId) return;
+    setHistoryPreparing(false);
+    elements.historyPrepareDetail.textContent = error.message;
+    showToast(error.message, true);
+  }
+}
+
+async function cancelGroupHistory(groupId = elements.group.value) {
+  if (!groupId) return;
+  clearHistoryPollTimer();
+  try {
+    await fetchJson(`/api/groups/${encodeURIComponent(groupId)}/history/prepare`, { method: 'DELETE' });
+  } catch (error) {
+    if (elements.group.value === groupId) showToast(error.message, true);
+  }
+  if (elements.group.value === groupId) await loadHistoryPreparationStatus(groupId);
+}
+
+async function switchHistoryGroup() {
+  const previousGroupId = state.historyGroupId;
+  const nextGroupId = elements.group.value;
+  if (state.historyPreparing && previousGroupId && previousGroupId !== nextGroupId) {
+    await cancelGroupHistory(previousGroupId);
+  }
+  clearHistoryPollTimer();
+  state.historyStatusRequestId += 1;
+  state.historyGroupId = nextGroupId || null;
+  setHistoryPreparing(false);
+  elements.historyPrepareMetric.textContent = '—';
+  elements.historyPrepareDetail.textContent = nextGroupId
+    ? 'Medindo mensagens disponíveis nesta sessão…'
+    : 'Selecione um grupo para medir o histórico disponível nesta sessão.';
+  resetPollHistory();
+  if (nextGroupId && state.status === 'connected') await loadHistoryPreparationStatus(nextGroupId);
 }
 
 function resetPollHistory() {
@@ -334,8 +458,8 @@ function setPollScanning(scanning) {
   state.scanningPolls = scanning;
   elements.scanPollsLabel.textContent = scanning ? 'Analisando histórico disponível…' : 'Analisar enquetes';
   elements.scanPollsSpinner.hidden = !scanning;
-  elements.historyLimit.disabled = scanning;
-  elements.historyPresets.forEach((button) => { button.disabled = scanning; });
+  elements.historyLimit.disabled = scanning || state.historyPreparing;
+  elements.historyPresets.forEach((button) => { button.disabled = scanning || state.historyPreparing; });
   syncPollHistoryGroup();
 }
 
@@ -456,8 +580,8 @@ async function scanPreviousPolls() {
   const groupId = elements.group.value;
   const limit = Number(elements.historyLimit.value);
   if (!groupId) return showToast('Selecione um grupo primeiro.', true);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
-    return showToast('Informe um limite inteiro entre 1 e 5000 mensagens.', true);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 15000) {
+    return showToast('Informe um limite inteiro entre 1 e 15000 mensagens.', true);
   }
 
   setHistoryLimit(limit);
@@ -468,7 +592,7 @@ async function scanPreviousPolls() {
   elements.historyStatus.className = 'history-status';
   elements.historyStatus.hidden = false;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000);
+  const timeout = setTimeout(() => controller.abort(), 10 * 60 * 1000);
   try {
     const data = await fetchJson(`/api/groups/${encodeURIComponent(groupId)}/polls/scan`, {
       method: 'POST',
@@ -482,7 +606,7 @@ async function scanPreviousPolls() {
   } catch (error) {
     if (requestId !== state.pollScanRequestId) return;
     elements.historyStatus.textContent = error.name === 'AbortError'
-      ? 'A análise ultrapassou 3 minutos. Ela pode ainda estar terminando no servidor; aguarde antes de tentar novamente.'
+      ? 'A análise ultrapassou 10 minutos. Ela pode ainda estar terminando no servidor; aguarde antes de tentar novamente.'
       : error.message;
     elements.historyStatus.className = 'history-status error';
     elements.historyStatus.hidden = false;
@@ -913,7 +1037,7 @@ elements.form.addEventListener('submit', sendPoll);
 elements.group.addEventListener('change', () => {
   if (elements.group.value) writeStoredValue(STORAGE_KEYS.lastGroupId, elements.group.value);
   resetMemberPicker();
-  resetPollHistory();
+  switchHistoryGroup();
 });
 elements.groupSearch.addEventListener('input', renderGroups);
 elements.clearForm.addEventListener('click', clearForm);
@@ -942,6 +1066,8 @@ elements.historyPresets.forEach((button) => {
 });
 elements.historyLimit.addEventListener('input', () => setHistoryLimit(elements.historyLimit.value));
 elements.scanPolls.addEventListener('click', scanPreviousPolls);
+elements.prepareHistory.addEventListener('click', prepareGroupHistory);
+elements.cancelHistory.addEventListener('click', () => cancelGroupHistory());
 elements.toggleRawJson.addEventListener('click', toggleRawPollJson);
 document.addEventListener('keydown', (event) => {
   if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter' || elements.bulkDialog.open || elements.memberDialog.open) return;
