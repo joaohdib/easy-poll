@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "check": "node --check src/server.js && node --check src/whatsapp.js && node --check public/app.js",
+    "check": "node --check src/server.js && node --check src/whatsapp.js && node --check src/poll-stats.js && node --check public/app.js && node --check public/stats.js",
     "test": "node --test"
   },
   "engines": {

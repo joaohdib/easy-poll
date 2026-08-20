@@ -9,14 +9,20 @@ const {
   HISTORY_PREPARE_DEFAULT_LIMIT,
   HISTORY_PREPARE_MAX_LIMIT
 } = require('./whatsapp');
+const { calculatePollStats } = require('./poll-stats');
 
 const app = express();
 const whatsapp = new WhatsAppService();
 const port = Number(process.env.PORT) || 3000;
+let latestPollScan = null;
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '20kb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+app.get('/stats', (_request, response) => {
+  response.sendFile(path.join(__dirname, '..', 'public', 'stats.html'));
+});
 
 app.get('/api/status', (_request, response) => {
   response.json(whatsapp.getStatus());
@@ -69,6 +75,7 @@ app.get('/api/groups/:groupId/members/:memberId/profile-picture', async (request
 app.post('/api/whatsapp/logout', async (_request, response, next) => {
   try {
     const status = await whatsapp.logout();
+    latestPollScan = null;
     return response.json({
       success: true,
       message: 'WhatsApp desconectado. Escaneie o próximo QR Code para conectar novamente.',
@@ -103,13 +110,26 @@ app.post('/api/groups/:groupId/polls/scan', async (request, response, next) => {
     if (validation.error) return response.status(400).json({ error: validation.error });
 
     response.set('Cache-Control', 'no-store');
-    return response.json(await whatsapp.scanGroupPolls(
+    const scan = await whatsapp.scanGroupPolls(
       validation.value.groupId,
       validation.value.limit
-    ));
+    );
+    latestPollScan = scan;
+    return response.json(scan);
   } catch (error) {
     return next(error);
   }
+});
+
+app.get('/api/stats', (_request, response) => {
+  response.set('Cache-Control', 'no-store');
+  if (!latestPollScan) {
+    return response.status(404).json({
+      error: 'Ainda não há dados para analisar.',
+      hasAnalysis: false
+    });
+  }
+  return response.json({ hasAnalysis: true, stats: calculatePollStats(latestPollScan) });
 });
 
 app.get('/api/groups/:groupId/history/status', async (request, response, next) => {

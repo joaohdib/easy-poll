@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="EasyPoll Stats — estatísticas das enquetes do seu grupo.">
+    <title>EasyPoll Stats</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/stats.css">
+    <script src="/stats.js" defer></script>
+  </head>
+  <body>
+    <main class="stats-shell">
+      <a class="stats-back" href="/">← Voltar para EasyPoll</a>
+
+      <header class="stats-hero">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-4.5 3v-3H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/><path d="M7 14v-2m4 2V8m4 6v-4m4 4V7"/></svg>
+        </div>
+        <div>
+          <p class="eyebrow">Análise de participação</p>
+          <h1>EasyPoll Stats</h1>
+          <p id="stats-group-name">Carregando análise mais recente…</p>
+        </div>
+      </header>
+
+      <section id="stats-loading" class="card stats-message" role="status">Calculando estatísticas…</section>
+
+      <section id="stats-empty" class="card stats-message" hidden>
+        <span class="stats-message-icon" aria-hidden="true">📊</span>
+        <h2>Ainda não há dados para analisar.</h2>
+        <p>Selecione um grupo, prepare o histórico e analise suas enquetes primeiro.</p>
+        <a class="button primary" href="/">Voltar</a>
+      </section>
+
+      <div id="stats-content" hidden>
+        <section id="stats-summary" class="stats-summary" aria-label="Resumo da análise"></section>
+
+        <section aria-labelledby="people-stats-title">
+          <div class="stats-section-heading">
+            <div>
+              <p class="step">Participantes</p>
+              <h2 id="people-stats-title">Destaques do grupo</h2>
+            </div>
+            <small>Baseado apenas nos participantes identificados nas enquetes.</small>
+          </div>
+          <div id="people-cards" class="people-cards"></div>
+        </section>
+
+        <section class="card ranking-card" aria-labelledby="ranking-title">
+          <div class="stats-section-heading compact">
+            <div>
+              <p class="step">Ranking</p>
+              <h2 id="ranking-title">Participação</h2>
+            </div>
+            <small id="ranking-denominator"></small>
+          </div>
+          <ol id="participation-ranking" class="participation-ranking"></ol>
+        </section>
+
+        <section aria-labelledby="poll-stats-title">
+          <div class="stats-section-heading">
+            <div>
+              <p class="step">Enquetes</p>
+              <h2 id="poll-stats-title">Destaques das votações</h2>
+            </div>
+          </div>
+          <div id="poll-cards" class="poll-stat-cards"></div>
+        </section>
+      </div>
+
+      <footer>Os dados existem somente nesta sessão local e incluem apenas informações relacionadas às enquetes.</footer>
+    </main>
+  </body>
+</html>

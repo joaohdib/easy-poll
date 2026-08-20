@@ -140,6 +140,7 @@ input::placeholder, textarea::placeholder { color: #a2aaa6; }
 .history-summary strong, .history-summary span { display: block; }
 .history-summary strong { font-size: 1.25rem; }
 .history-summary span { margin-top: 3px; color: var(--muted); font-size: .68rem; line-height: 1.25; }
+.stats-link { text-decoration: none; }
 .history-polls { display: grid; gap: 12px; margin-top: 16px; }
 .history-empty { margin: 0; padding: 22px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: .84rem; text-align: center; }
 .history-poll { padding: 17px; border: 1px solid var(--line); border-radius: 13px; background: #fbfcfb; }
