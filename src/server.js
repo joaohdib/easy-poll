@@ -2,7 +2,11 @@
 
 const path = require('path');
 const express = require('express');
-const { WhatsAppService } = require('./whatsapp');
+const {
+  WhatsAppService,
+  POLL_SCAN_DEFAULT_LIMIT,
+  POLL_SCAN_MAX_LIMIT
+} = require('./whatsapp');
 
 const app = express();
 const whatsapp = new WhatsAppService();
@@ -91,6 +95,21 @@ app.post('/api/polls', async (request, response, next) => {
   }
 });
 
+app.post('/api/groups/:groupId/polls/scan', async (request, response, next) => {
+  try {
+    const validation = validatePollScan(request.params.groupId, request.body);
+    if (validation.error) return response.status(400).json({ error: validation.error });
+
+    response.set('Cache-Control', 'no-store');
+    return response.json(await whatsapp.scanGroupPolls(
+      validation.value.groupId,
+      validation.value.limit
+    ));
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.use('/api', (_request, response) => {
   response.status(404).json({ error: 'Endpoint não encontrado.' });
 });
@@ -101,7 +120,9 @@ app.use((error, _request, response, _next) => {
     GROUP_NOT_FOUND: 404,
     GROUP_MEMBERS_UNAVAILABLE: 504,
     GROUP_MEMBER_NOT_FOUND: 404,
-    WHATSAPP_LOGOUT_FAILED: 502
+    WHATSAPP_LOGOUT_FAILED: 502,
+    POLL_SCAN_BUSY: 409,
+    POLL_MESSAGES_FETCH_FAILED: 502
   };
   const status = knownErrors[error.code] || 500;
 
@@ -139,6 +160,21 @@ function validatePoll(body) {
   };
 }
 
+function validatePollScan(groupIdValue, body) {
+  const groupId = typeof groupIdValue === 'string' ? groupIdValue.trim() : '';
+  if (!groupId.endsWith('@g.us')) return { error: 'Selecione um grupo válido.' };
+  if (body !== undefined && (body === null || typeof body !== 'object' || Array.isArray(body))) {
+    return { error: 'Corpo da solicitação inválido.' };
+  }
+
+  const rawLimit = body?.limit ?? POLL_SCAN_DEFAULT_LIMIT;
+  const limit = Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > POLL_SCAN_MAX_LIMIT) {
+    return { error: `O limite deve ser um número inteiro entre 1 e ${POLL_SCAN_MAX_LIMIT}.` };
+  }
+  return { value: { groupId, limit } };
+}
+
 const server = app.listen(port, () => {
   console.log(`Aplicação disponível em http://localhost:${port}`);
   whatsapp.initialize();
@@ -157,4 +193,4 @@ async function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-module.exports = { app, validatePoll };
+module.exports = { app, validatePoll, validatePollScan };

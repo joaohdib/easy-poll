@@ -107,6 +107,39 @@ input::placeholder, textarea::placeholder { color: #a2aaa6; }
 .clear-form { display: block; min-height: 36px; margin: 10px auto -8px; padding: 0 8px; color: var(--muted); background: transparent; font-size: .78rem; }
 .clear-form:hover { color: var(--danger); }
 
+.experimental-badge { padding: 6px 9px; border-radius: 999px; color: #8a5d06; background: #fff3cd; font-size: .7rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.history-description { margin: 16px 0 0; color: var(--muted); font-size: .82rem; line-height: 1.55; }
+.history-fields { margin-top: 20px; }
+.history-current-group { display: grid; gap: 4px; margin-bottom: 20px; padding: 13px 15px; border-radius: 11px; background: var(--canvas); }
+.history-current-group span { color: var(--muted); font-size: .72rem; font-weight: 750; text-transform: uppercase; }
+.history-current-group strong { overflow: hidden; font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
+.history-limit-field { display: grid; grid-template-columns: 1fr 110px; gap: 8px 12px; }
+.history-limit-field > label, .history-limit-field > small { grid-column: 1 / -1; }
+.history-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.history-preset { min-height: 48px; }
+.history-preset.active { border-color: var(--green); color: var(--green-dark); background: var(--green-soft); }
+.history-scan-button { margin-top: 4px; }
+.history-status { margin: 20px 0 0; padding: 13px 15px; border-radius: 11px; color: var(--muted); background: var(--canvas); font-size: .84rem; }
+.history-status.error { color: #973838; background: #fff0f0; }
+.history-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-top: 20px; }
+.history-summary div { padding: 13px 10px; border: 1px solid var(--line); border-radius: 11px; text-align: center; }
+.history-summary strong, .history-summary span { display: block; }
+.history-summary strong { font-size: 1.25rem; }
+.history-summary span { margin-top: 3px; color: var(--muted); font-size: .68rem; line-height: 1.25; }
+.history-polls { display: grid; gap: 12px; margin-top: 16px; }
+.history-empty { margin: 0; padding: 22px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: .84rem; text-align: center; }
+.history-poll { padding: 17px; border: 1px solid var(--line); border-radius: 13px; background: #fbfcfb; }
+.history-poll h3 { margin: 0; font-size: 1rem; line-height: 1.4; }
+.history-meta { display: flex; flex-wrap: wrap; gap: 5px 13px; margin: 7px 0 12px; color: var(--muted); font-size: .73rem; }
+.history-options { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.history-options li { padding: 5px 8px; border-radius: 8px; color: var(--green-dark); background: var(--green-soft); font-size: .74rem; }
+.history-votes-title { margin: 14px 0 7px; font-size: .78rem; }
+.history-votes { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.history-votes li { color: var(--muted); font-size: .78rem; line-height: 1.4; }
+.history-warning { margin: 14px 0 0; color: #956308; font-size: .78rem; }
+.raw-json-button { margin-top: 16px; }
+.history-raw-json { max-height: 430px; margin: 10px 0 0; padding: 15px; overflow: auto; border-radius: 11px; color: #d8eee2; background: #17251e; font: .72rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .checkbox-row { display: flex; align-items: flex-start; gap: 11px; cursor: pointer; }
 .checkbox-row input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .fake-checkbox { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 1px; border: 1.5px solid #b7c2bc; border-radius: 6px; background: white; }
@@ -193,4 +226,7 @@ footer { padding-top: 8px; color: #88938e; font-size: .75rem; text-align: center
   .member-dialog-actions { grid-template-columns: 1fr; }
   .member-dialog-actions .secondary { order: 2; }
   .member-list { max-height: calc(100vh - 390px); }
+  .history-summary { grid-template-columns: 1fr; }
+  .history-limit-field { grid-template-columns: 1fr; }
+  .history-limit-field > label, .history-limit-field > small { grid-column: auto; }
 }

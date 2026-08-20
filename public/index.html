@@ -115,6 +115,46 @@
         </fieldset>
       </form>
 
+      <section class="card history-card" aria-labelledby="history-title">
+        <div class="section-heading">
+          <div>
+            <p class="step">Enquetes anteriores</p>
+            <h2 id="history-title">Analisar histórico disponível</h2>
+          </div>
+          <span class="experimental-badge">Experimental</span>
+        </div>
+        <p class="history-description">Analisa somente as mensagens que o WhatsApp Web disponibilizar para esta sessão. Enquetes muito antigas podem não estar acessíveis.</p>
+
+        <fieldset id="history-fields" class="history-fields" disabled>
+          <div class="history-current-group">
+            <span>Grupo atual</span>
+            <strong id="history-group-name">Selecione um grupo acima</strong>
+          </div>
+          <div class="field history-limit-field">
+            <label for="history-limit">Mensagens a analisar</label>
+            <div class="history-presets" aria-label="Limites de mensagens">
+              <button class="button secondary history-preset" type="button" data-limit="100">100</button>
+              <button class="button secondary history-preset" type="button" data-limit="500">500</button>
+              <button class="button secondary history-preset active" type="button" data-limit="1000">1000</button>
+            </div>
+            <input id="history-limit" type="number" min="1" max="5000" step="1" value="1000">
+            <small>Limite máximo nesta etapa experimental: 5000 mensagens.</small>
+          </div>
+          <button id="scan-polls" class="button primary history-scan-button" type="button">
+            <span class="button-label">Analisar enquetes</span>
+            <span class="spinner" hidden></span>
+          </button>
+        </fieldset>
+
+        <p id="history-status" class="history-status" role="status" aria-live="polite" hidden></p>
+        <div id="history-results" hidden>
+          <div id="history-summary" class="history-summary"></div>
+          <div id="history-polls" class="history-polls"></div>
+          <button id="toggle-raw-json" class="button secondary raw-json-button" type="button" aria-expanded="false">Ver JSON bruto</button>
+          <pre id="history-raw-json" class="history-raw-json" hidden></pre>
+        </div>
+      </section>
+
       <dialog id="bulk-dialog" class="app-dialog bulk-dialog" aria-labelledby="bulk-dialog-title">
         <form id="bulk-form" method="dialog" class="dialog-shell">
           <div class="dialog-header">

@@ -21,7 +21,10 @@ const state = {
   photoQueue: [],
   activePhotoLoads: 0,
   groups: [],
-  favoriteGroupIds: new Set()
+  favoriteGroupIds: new Set(),
+  scanningPolls: false,
+  pollScanRequestId: 0,
+  pollScanResult: null
 };
 
 const elements = {
@@ -69,6 +72,19 @@ const elements = {
   clearMembers: document.querySelector('#clear-members'),
   cancelMembers: document.querySelector('#cancel-members'),
   applyMembers: document.querySelector('#apply-members'),
+  historyFields: document.querySelector('#history-fields'),
+  historyGroupName: document.querySelector('#history-group-name'),
+  historyLimit: document.querySelector('#history-limit'),
+  historyPresets: [...document.querySelectorAll('.history-preset')],
+  scanPolls: document.querySelector('#scan-polls'),
+  scanPollsLabel: document.querySelector('#scan-polls .button-label'),
+  scanPollsSpinner: document.querySelector('#scan-polls .spinner'),
+  historyStatus: document.querySelector('#history-status'),
+  historyResults: document.querySelector('#history-results'),
+  historySummary: document.querySelector('#history-summary'),
+  historyPolls: document.querySelector('#history-polls'),
+  toggleRawJson: document.querySelector('#toggle-raw-json'),
+  historyRawJson: document.querySelector('#history-raw-json'),
   toast: document.querySelector('#toast')
 };
 
@@ -166,7 +182,9 @@ async function updateStatus() {
     elements.statusBadge.innerHTML = `<span class="status-dot"></span><span>${copy[0]}</span>`;
     elements.connectionHint.textContent = data.error || copy[1];
     elements.pollFields.disabled = data.status !== 'connected';
+    elements.historyFields.disabled = data.status !== 'connected';
     elements.disconnectWhatsApp.hidden = data.status !== 'connected';
+    syncPollHistoryGroup();
 
     if (data.status === 'waiting_qr' && data.hasQrCode) await updateQrCode(requestId);
     else hideQrCode();
@@ -178,6 +196,7 @@ async function updateStatus() {
     elements.statusBadge.innerHTML = '<span class="status-dot"></span><span>Servidor offline</span>';
     elements.connectionHint.textContent = 'Não foi possível acessar o servidor local.';
     elements.pollFields.disabled = true;
+    elements.historyFields.disabled = true;
     elements.disconnectWhatsApp.hidden = true;
     hideQrCode();
   }
@@ -209,6 +228,7 @@ function clearLoadedGroups() {
   elements.groupEmpty.hidden = true;
   elements.groupHelp.textContent = 'Os grupos aparecem quando a conexão estiver pronta.';
   resetMemberPicker();
+  resetPollHistory();
 }
 
 async function disconnectWhatsApp() {
@@ -287,6 +307,196 @@ function selectGroup(groupId, persist = true) {
   if (persist) writeStoredValue(STORAGE_KEYS.lastGroupId, groupId);
   if (changed) elements.group.dispatchEvent(new Event('change'));
   renderGroups();
+}
+
+function syncPollHistoryGroup() {
+  const group = state.groups.find((candidate) => candidate.id === elements.group.value);
+  elements.historyGroupName.textContent = group?.name || 'Selecione um grupo acima';
+  elements.scanPolls.disabled = state.scanningPolls || state.status !== 'connected' || !group;
+}
+
+function resetPollHistory() {
+  state.pollScanRequestId += 1;
+  state.pollScanResult = null;
+  elements.historyStatus.hidden = true;
+  elements.historyStatus.className = 'history-status';
+  elements.historyResults.hidden = true;
+  elements.historySummary.replaceChildren();
+  elements.historyPolls.replaceChildren();
+  elements.historyRawJson.hidden = true;
+  elements.historyRawJson.textContent = '';
+  elements.toggleRawJson.textContent = 'Ver JSON bruto';
+  elements.toggleRawJson.setAttribute('aria-expanded', 'false');
+  syncPollHistoryGroup();
+}
+
+function setPollScanning(scanning) {
+  state.scanningPolls = scanning;
+  elements.scanPollsLabel.textContent = scanning ? 'Analisando histórico disponível…' : 'Analisar enquetes';
+  elements.scanPollsSpinner.hidden = !scanning;
+  elements.historyLimit.disabled = scanning;
+  elements.historyPresets.forEach((button) => { button.disabled = scanning; });
+  syncPollHistoryGroup();
+}
+
+function setHistoryLimit(limit) {
+  elements.historyLimit.value = String(limit);
+  elements.historyPresets.forEach((button) => {
+    button.classList.toggle('active', Number(button.dataset.limit) === Number(limit));
+  });
+}
+
+function formatPollDate(timestamp) {
+  if (!Number.isFinite(Number(timestamp))) return 'Data indisponível';
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short'
+  }).format(new Date(Number(timestamp) * 1000));
+}
+
+function appendSummaryItem(value, label) {
+  const item = document.createElement('div');
+  const strong = document.createElement('strong');
+  const span = document.createElement('span');
+  strong.textContent = String(value);
+  span.textContent = label;
+  item.append(strong, span);
+  elements.historySummary.appendChild(item);
+}
+
+function displayPerson(name, id) {
+  return name || id || 'Pessoa não identificada';
+}
+
+function renderPollCard(poll) {
+  const card = document.createElement('article');
+  card.className = 'history-poll';
+
+  const title = document.createElement('h3');
+  title.textContent = poll.question || 'Enquete sem pergunta disponível';
+  const meta = document.createElement('div');
+  meta.className = 'history-meta';
+  const author = displayPerson(poll.authorName, poll.authorId);
+  [
+    formatPollDate(poll.timestamp),
+    `Autor: ${author}`,
+    `${poll.options.length} ${poll.options.length === 1 ? 'opção' : 'opções'}`,
+    `${poll.voteCount} ${poll.voteCount === 1 ? 'voto' : 'votos'}`
+  ].forEach((value) => {
+    const span = document.createElement('span');
+    span.textContent = value;
+    meta.appendChild(span);
+  });
+  card.append(title, meta);
+
+  if (poll.options.length) {
+    const options = document.createElement('ul');
+    options.className = 'history-options';
+    poll.options.forEach((name) => {
+      const item = document.createElement('li');
+      item.textContent = name;
+      options.appendChild(item);
+    });
+    card.appendChild(options);
+  }
+
+  if (poll.votesAvailable) {
+    const votesTitle = document.createElement('p');
+    votesTitle.className = 'history-votes-title';
+    votesTitle.textContent = 'Votos';
+    card.appendChild(votesTitle);
+    if (poll.votes.length) {
+      const votes = document.createElement('ul');
+      votes.className = 'history-votes';
+      poll.votes.forEach((vote) => {
+        const item = document.createElement('li');
+        const selections = vote.selectedOptions.length
+          ? vote.selectedOptions.join(', ')
+          : 'nenhuma opção selecionada';
+        item.textContent = `${displayPerson(vote.voterName, vote.voterId)} → ${selections}`;
+        if (vote.timestamp) item.title = formatPollDate(vote.timestamp);
+        votes.appendChild(item);
+      });
+      card.appendChild(votes);
+    } else {
+      const empty = document.createElement('p');
+      empty.className = 'history-warning';
+      empty.textContent = 'Nenhum voto foi disponibilizado para esta enquete.';
+      card.appendChild(empty);
+    }
+  } else {
+    const warning = document.createElement('p');
+    warning.className = 'history-warning';
+    warning.textContent = `⚠ Não foi possível recuperar os votos desta enquete${poll.votesError ? `: ${poll.votesError}` : '.'}`;
+    card.appendChild(warning);
+  }
+  return card;
+}
+
+function renderPollScan(data) {
+  state.pollScanResult = data;
+  elements.historySummary.replaceChildren();
+  appendSummaryItem(data.messagesScanned, 'mensagens analisadas');
+  appendSummaryItem(data.pollsFound, 'enquetes encontradas');
+  appendSummaryItem(data.pollsWithVotesAvailable, 'com votos disponíveis');
+  elements.historyPolls.replaceChildren();
+  if (data.polls.length) data.polls.forEach((poll) => elements.historyPolls.appendChild(renderPollCard(poll)));
+  else {
+    const empty = document.createElement('p');
+    empty.className = 'history-empty';
+    empty.textContent = 'Nenhuma enquete apareceu nas mensagens disponibilizadas. Isso não significa necessariamente que o grupo nunca teve enquetes.';
+    elements.historyPolls.appendChild(empty);
+  }
+  elements.historyRawJson.textContent = JSON.stringify(data, null, 2);
+  elements.historyResults.hidden = false;
+}
+
+async function scanPreviousPolls() {
+  if (state.scanningPolls) return;
+  const groupId = elements.group.value;
+  const limit = Number(elements.historyLimit.value);
+  if (!groupId) return showToast('Selecione um grupo primeiro.', true);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
+    return showToast('Informe um limite inteiro entre 1 e 5000 mensagens.', true);
+  }
+
+  setHistoryLimit(limit);
+  setPollScanning(true);
+  const requestId = ++state.pollScanRequestId;
+  elements.historyResults.hidden = true;
+  elements.historyStatus.textContent = 'Analisando histórico disponível… Isso pode levar alguns minutos.';
+  elements.historyStatus.className = 'history-status';
+  elements.historyStatus.hidden = false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180000);
+  try {
+    const data = await fetchJson(`/api/groups/${encodeURIComponent(groupId)}/polls/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit }),
+      signal: controller.signal
+    });
+    if (requestId !== state.pollScanRequestId || elements.group.value !== groupId) return;
+    elements.historyStatus.hidden = true;
+    renderPollScan(data);
+  } catch (error) {
+    if (requestId !== state.pollScanRequestId) return;
+    elements.historyStatus.textContent = error.name === 'AbortError'
+      ? 'A análise ultrapassou 3 minutos. Ela pode ainda estar terminando no servidor; aguarde antes de tentar novamente.'
+      : error.message;
+    elements.historyStatus.className = 'history-status error';
+    elements.historyStatus.hidden = false;
+  } finally {
+    clearTimeout(timeout);
+    setPollScanning(false);
+  }
+}
+
+function toggleRawPollJson() {
+  const willShow = elements.historyRawJson.hidden;
+  elements.historyRawJson.hidden = !willShow;
+  elements.toggleRawJson.textContent = willShow ? 'Ocultar JSON bruto' : 'Ver JSON bruto';
+  elements.toggleRawJson.setAttribute('aria-expanded', String(willShow));
 }
 
 function toggleFavoriteGroup(groupId) {
@@ -703,6 +913,7 @@ elements.form.addEventListener('submit', sendPoll);
 elements.group.addEventListener('change', () => {
   if (elements.group.value) writeStoredValue(STORAGE_KEYS.lastGroupId, elements.group.value);
   resetMemberPicker();
+  resetPollHistory();
 });
 elements.groupSearch.addEventListener('input', renderGroups);
 elements.clearForm.addEventListener('click', clearForm);
@@ -726,6 +937,12 @@ elements.applyMembers.addEventListener('click', applySelectedMembers);
 elements.memberDialog.addEventListener('click', (event) => {
   if (event.target === elements.memberDialog) elements.memberDialog.close();
 });
+elements.historyPresets.forEach((button) => {
+  button.addEventListener('click', () => setHistoryLimit(Number(button.dataset.limit)));
+});
+elements.historyLimit.addEventListener('input', () => setHistoryLimit(elements.historyLimit.value));
+elements.scanPolls.addEventListener('click', scanPreviousPolls);
+elements.toggleRawJson.addEventListener('click', toggleRawPollJson);
 document.addEventListener('keydown', (event) => {
   if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter' || elements.bulkDialog.open || elements.memberDialog.open) return;
   event.preventDefault();
@@ -735,5 +952,6 @@ document.addEventListener('keydown', (event) => {
 
 addOption();
 addOption();
+syncPollHistoryGroup();
 updateStatus();
 setInterval(updateStatus, 2500);
