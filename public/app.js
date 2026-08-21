@@ -1,6 +1,7 @@
 'use strict';
 
 const MAX_POLL_OPTIONS = 12;
+const MAX_HISTORY_MESSAGES = 500_000;
 const STORAGE_KEYS = Object.freeze({
   lastGroupId: 'easyPoll.lastGroupId',
   favoriteGroups: 'easyPoll.favoriteGroups'
@@ -386,8 +387,8 @@ async function prepareGroupHistory() {
   const groupId = elements.group.value;
   const target = Number(elements.historyLimit.value);
   if (!groupId || state.historyPreparing) return;
-  if (!Number.isInteger(target) || target < 1 || target > 15000) {
-    return showToast('Informe um alvo inteiro entre 1 e 15000 mensagens.', true);
+  if (!Number.isInteger(target) || target < 1 || target > MAX_HISTORY_MESSAGES) {
+    return showToast('Informe um alvo inteiro entre 1 e 500.000 mensagens.', true);
   }
   const requestId = ++state.historyStatusRequestId;
   setHistoryPreparing(true);
@@ -500,7 +501,10 @@ function renderPollCard(poll) {
   title.textContent = poll.question || 'Enquete sem pergunta disponível';
   const meta = document.createElement('div');
   meta.className = 'history-meta';
-  const author = displayPerson(poll.authorName, poll.authorId);
+  const author = displayPerson(
+    poll.creatorName || poll.authorName,
+    poll.creatorId || poll.authorId
+  );
   [
     formatPollDate(poll.timestamp),
     `Autor: ${author}`,
@@ -580,8 +584,8 @@ async function scanPreviousPolls() {
   const groupId = elements.group.value;
   const limit = Number(elements.historyLimit.value);
   if (!groupId) return showToast('Selecione um grupo primeiro.', true);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 15000) {
-    return showToast('Informe um limite inteiro entre 1 e 15000 mensagens.', true);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_HISTORY_MESSAGES) {
+    return showToast('Informe um limite inteiro entre 1 e 500.000 mensagens.', true);
   }
 
   setHistoryLimit(limit);

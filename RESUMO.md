@@ -43,7 +43,7 @@ Estado atualizado em 20/08/2026.
   - não envia mensagens comuns ao frontend nem persiste o histórico;
   - executa somente mediante clique;
   - usa o grupo atualmente selecionado;
-  - permite solicitar 100, 500, 1000 ou um limite personalizado de até 15000 mensagens;
+  - permite solicitar 100, 500, 1000, 500 mil ou um limite personalizado de até 500.000 mensagens;
   - identifica exclusivamente mensagens do tipo `poll_creation`;
   - mostra pergunta, data, autor, opções e votos disponíveis;
   - apresenta falhas de votos individualmente, sem interromper as demais enquetes;
@@ -139,7 +139,7 @@ Exemplo do corpo da análise experimental:
 - Podem ser selecionados no máximo 12 membros por causa do limite definido para as opções da enquete.
 - O retorno da biblioteca pode não conter o ID da mensagem mesmo quando a enquete foi enviada; uma operação sem exceção é tratada como sucesso.
 - A análise de histórico nunca roda automaticamente e impede duas análises simultâneas no mesmo cliente.
-- O endpoint aceita limites de 1 a 15000 mensagens; o padrão é 1000.
+- O endpoint aceita limites de 1 a 500.000 mensagens; o padrão é 1000.
 - A interface interrompe a espera após três minutos. O backend pode ainda estar concluindo a operação e continuará rejeitando uma segunda análise simultânea.
 - `Chat#fetchMessages()` pode retornar menos mensagens que o limite solicitado quando não há mais histórico disponível para a sessão.
 - `Client#getChatById()` apresentou uma falha de serialização (`r: r`) com o WhatsApp Web atual. A análise usa uma instância mínima de `Chat`, mantendo o `Chat#fetchMessages()` da versão instalada sem serializar o modelo completo do grupo.

@@ -129,7 +129,7 @@ input::placeholder, textarea::placeholder { color: #a2aaa6; }
 .spinner.dark { border-color: rgba(14,109,73,.2); border-top-color: var(--green-dark); }
 .history-limit-field { display: grid; grid-template-columns: 1fr 110px; gap: 8px 12px; }
 .history-limit-field > label, .history-limit-field > small { grid-column: 1 / -1; }
-.history-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.history-presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
 .history-preset { min-height: 48px; }
 .history-preset.active { border-color: var(--green); color: var(--green-dark); background: var(--green-soft); }
 .history-scan-button { margin-top: 4px; }

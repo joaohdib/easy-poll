@@ -5,11 +5,11 @@ const QRCode = require('qrcode');
 const { Chat, Client, LocalAuth, MessageTypes, Poll } = require('whatsapp-web.js');
 
 const POLL_SCAN_DEFAULT_LIMIT = 1000;
-const POLL_SCAN_MAX_LIMIT = 15000;
+const POLL_SCAN_MAX_LIMIT = 500_000;
 const HISTORY_PREPARE_DEFAULT_LIMIT = 1000;
-const HISTORY_PREPARE_MAX_LIMIT = 15000;
+const HISTORY_PREPARE_MAX_LIMIT = 500_000;
 const HISTORY_PREPARE_TIMEOUT_MS = 10 * 60 * 1000;
-const HISTORY_PREPARE_DELAY_MS = 50;
+const HISTORY_PREPARE_DELAY_MS = 15;
 const HISTORY_PREPARE_STABLE_ATTEMPTS = 3;
 const INITIALIZATION_MAX_RETRIES = 2;
 const INITIALIZATION_RETRY_DELAY_MS = 1500;
@@ -458,15 +458,18 @@ class WhatsAppService {
     const polls = [];
     let pollsWithVotesAvailable = 0;
     for (const message of pollMessages) {
-      const authorId = normalizeWhatsAppId(message.author)
-        || (message.fromMe ? ownId : normalizeWhatsAppId(message.from));
+      const contextualCreatorId = normalizeWhatsAppId(message.participant)
+        || normalizeWhatsAppId(message.from);
+      const creatorId = normalizeWhatsAppId(message.author)
+        || (message.fromMe ? ownId : null)
+        || (contextualCreatorId && !contextualCreatorId.endsWith('@g.us') ? contextualCreatorId : null);
       const messageId = normalizeWhatsAppId(message.id);
       const poll = {
         messageId,
         question: cleanText(message.pollName, 500) || 'Enquete sem pergunta disponível',
         timestamp: Number(message.timestamp) || null,
-        authorId,
-        authorName: resolveKnownName(authorId, namesById),
+        creatorId,
+        creatorName: resolveKnownName(creatorId, namesById),
         options: normalizePollOptions(message.pollOptions),
         allowMultipleAnswers: Boolean(message.allowMultipleAnswers),
         votes: [],

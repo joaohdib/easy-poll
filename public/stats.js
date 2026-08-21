@@ -6,14 +6,26 @@ const elements = {
   content: document.querySelector('#stats-content'),
   groupName: document.querySelector('#stats-group-name'),
   summary: document.querySelector('#stats-summary'),
-  peopleCards: document.querySelector('#people-cards'),
+  participationCards: document.querySelector('#participation-cards'),
+  behaviorCards: document.querySelector('#behavior-cards'),
+  speedCards: document.querySelector('#speed-cards'),
+  connectionCards: document.querySelector('#connection-cards'),
+  affinityRankings: document.querySelector('#affinity-rankings'),
   ranking: document.querySelector('#participation-ranking'),
   rankingDenominator: document.querySelector('#ranking-denominator'),
-  pollCards: document.querySelector('#poll-cards')
+  timestampBasis: document.querySelector('#timestamp-basis'),
+  pollCards: document.querySelector('#poll-cards'),
+  activityCards: document.querySelector('#activity-cards')
 };
 
+const numberFormatter = new Intl.NumberFormat('pt-BR');
+const percentFormatter = new Intl.NumberFormat('pt-BR', {
+  maximumFractionDigits: 1,
+  minimumFractionDigits: 1
+});
+
 function formatPercent(value) {
-  return `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(value || 0)}%`;
+  return `${percentFormatter.format(value || 0)}%`;
 }
 
 function formatDuration(totalSeconds) {
@@ -33,80 +45,229 @@ function makeElement(tag, className, text) {
   return element;
 }
 
+function plural(value, singular, pluralForm) {
+  return `${numberFormatter.format(value)} ${value === 1 ? singular : pluralForm}`;
+}
+
 function renderSummary(summary) {
   const items = [
     [summary.pollsFound, 'enquetes encontradas'],
     [summary.eligiblePolls, 'com dados de votação'],
     [summary.totalParticipations, 'participações'],
-    [summary.identifiedParticipants, 'participantes identificados']
+    [summary.identifiedParticipants, 'participantes identificados'],
+    [summary.validTimestampVotes, 'votos com horário válido'],
+    [summary.identifiedCreators, `criadores · ${summary.pollsWithIdentifiedCreator}/${summary.pollsFound} enquetes com autor`]
   ];
   elements.summary.replaceChildren(...items.map(([value, label]) => {
     const item = makeElement('div', 'summary-stat');
-    item.append(makeElement('strong', '', value), makeElement('span', '', label));
+    item.append(makeElement('strong', '', numberFormatter.format(value)), makeElement('span', '', label));
     return item;
   }));
 }
 
-function renderPersonCard({ icon, title, member, value, description, accent }) {
-  const card = makeElement('article', `card person-stat-card ${accent || ''}`);
+function renderStatCard({ icon, title, name, value, description, explanation, accent, emptyTitle }) {
+  const card = makeElement('article', `card stat-card ${accent || ''}`);
   const heading = makeElement('div', 'person-stat-heading');
   heading.append(makeElement('span', 'person-stat-icon', icon), makeElement('h3', '', title));
+  if (explanation) {
+    const info = makeElement('span', 'stat-info', '?');
+    info.title = explanation;
+    info.tabIndex = 0;
+    info.setAttribute('role', 'img');
+    info.setAttribute('aria-label', explanation);
+    heading.appendChild(info);
+  }
   card.appendChild(heading);
-  if (!member) {
+  if (!name) {
     card.append(
-      makeElement('strong', 'insufficient', 'Dados insuficientes'),
+      makeElement('strong', 'insufficient', emptyTitle || 'Dados insuficientes'),
       makeElement('p', 'person-stat-description', description)
     );
     return card;
   }
   card.append(
-    makeElement('strong', 'person-stat-name', member.name),
+    makeElement('strong', 'person-stat-name', name),
     makeElement('span', 'person-stat-value', value),
     makeElement('p', 'person-stat-description', description)
   );
   return card;
 }
 
-function renderPeople(stats) {
+function renderParticipation(stats) {
   const eligible = stats.summary.eligiblePolls;
-  const cards = [
-    {
-      icon: '🏆', title: 'Mais participativo', member: stats.mostActive, accent: 'winner',
+  elements.participationCards.replaceChildren(
+    renderStatCard({
+      icon: '🏆', title: 'Mais participativo', name: stats.mostActive?.name, accent: 'winner',
       value: stats.mostActive ? formatPercent(stats.mostActive.participationRate) : '',
       description: stats.mostActive
         ? `${stats.mostActive.pollsParticipated} de ${eligible} enquetes com dados de votos`
         : 'Nenhum participante foi identificado.'
-    },
-    {
-      icon: '😴', title: 'Menos participativo', member: stats.leastActive,
+    }),
+    renderStatCard({
+      icon: '😴', title: 'Menos participativo', name: stats.leastActive?.name,
       value: stats.leastActive ? formatPercent(stats.leastActive.participationRate) : '',
       description: stats.leastActive
         ? `${stats.leastActive.pollsParticipated} de ${eligible} enquetes com dados de votos`
         : 'Nenhum participante foi identificado.'
-    },
-    {
-      icon: '⚡', title: 'Mais rápido para votar', member: stats.fastestVoter, accent: 'speed',
-      value: stats.fastestVoter ? `Média: ${formatDuration(stats.fastestVoter.averageVoteDelaySeconds)}` : '',
-      description: stats.fastestVoter
-        ? `Baseado em ${stats.fastestVoter.validTimingSamples} enquetes com timestamps válidos`
-        : `São necessárias ${stats.minimumBehaviorSample} enquetes com timestamps válidos.`
-    },
-    {
-      icon: '🤝', title: 'Mais alinhado com o grupo', member: stats.mostAligned, accent: 'aligned',
+    })
+  );
+}
+
+function renderBehavior(stats) {
+  const unpredictable = stats.mostUnpredictable;
+  const unlucky = stats.unluckiestMember;
+  const participationRule = `É preciso participar de pelo menos ${formatPercent(stats.minimumBehaviorParticipationRate)} das enquetes`;
+  elements.behaviorCards.replaceChildren(
+    renderStatCard({
+      icon: '🤝', title: 'Mais alinhado', name: stats.mostAligned?.name, accent: 'aligned',
       value: stats.mostAligned ? formatPercent(stats.mostAligned.alignedRate) : '',
       description: stats.mostAligned
-        ? `Escolheu uma opção vencedora em ${stats.mostAligned.alignedPolls} de ${stats.mostAligned.pollsParticipated} enquetes participadas`
-        : `São necessárias ${stats.minimumBehaviorSample} enquetes participadas.`
-    },
-    {
-      icon: '🧨', title: 'Mais “do contra”', member: stats.mostContrarian, accent: 'contrarian',
+        ? `Acompanhou uma opção vencedora em ${stats.mostAligned.alignedPolls} de ${stats.mostAligned.behaviorPolls} enquetes.`
+        : `${participationRule} e ter ${stats.minimumBehaviorSample} resultados elegíveis.`
+    }),
+    renderStatCard({
+      icon: '🧨', title: 'Mais “do contra”', name: stats.mostContrarian?.name, accent: 'contrarian',
       value: stats.mostContrarian ? formatPercent(stats.mostContrarian.contrarianRate) : '',
       description: stats.mostContrarian
-        ? `Escolheu apenas opções derrotadas em ${stats.mostContrarian.contrarianPolls} de ${stats.mostContrarian.pollsParticipated} enquetes participadas`
-        : `São necessárias ${stats.minimumBehaviorSample} enquetes participadas.`
-    }
-  ];
-  elements.peopleCards.replaceChildren(...cards.map(renderPersonCard));
+        ? `Não escolheu nenhuma vencedora em ${stats.mostContrarian.contrarianPolls} de ${stats.mostContrarian.behaviorPolls} enquetes.`
+        : `${participationRule} e ter ${stats.minimumBehaviorSample} resultados elegíveis.`
+    }),
+    renderStatCard({
+      icon: '🎲', title: 'Mais imprevisível', name: unpredictable?.name, accent: 'unpredictable',
+      value: unpredictable
+        ? `${formatPercent(unpredictable.alignedRate)} × ${formatPercent(unpredictable.contrarianRate)}` : '',
+      description: unpredictable
+        ? `Alinhado × do contra. Base: ${plural(unpredictable.behaviorPolls, 'enquete', 'enquetes')}.`
+        : `${participationRule} e ter ${stats.minimumExtendedSample} resultados elegíveis.`,
+      explanation: 'Alterna mais entre acompanhar e contrariar o resultado das enquetes.'
+    }),
+    renderStatCard({
+      icon: '💀', title: 'Azarado oficial', name: unlucky?.name, accent: 'unlucky',
+      value: unlucky ? formatPercent(unlucky.lastPlaceRate) : '',
+      description: unlucky
+        ? `Escolheu uma última colocada em ${unlucky.lastPlacePolls} de ${unlucky.lastPlaceEligiblePolls} enquetes.`
+        : `${participationRule} e ter ${stats.minimumExtendedSample} resultados elegíveis.`,
+      explanation: 'Mais frequentemente escolhe pelo menos uma opção que termina em último.'
+    })
+  );
+}
+
+function timingNames(result) {
+  return result?.leaders?.map((leader) => leader.name).join(' · ') || '';
+}
+
+function renderSpeed(stats) {
+  const first = stats.firstVoter;
+  const last = stats.lastVoter;
+  elements.timestampBasis.textContent = stats.summary.validTimestampVotes
+    ? `Baseado em ${plural(stats.summary.validTimestampVotes, 'voto com horário disponível', 'votos com horário disponível')}.`
+    : 'Nenhum voto possui horário válido disponível.';
+  elements.speedCards.replaceChildren(
+    renderStatCard({
+      icon: '⚡', title: 'Mais rápido para votar', name: stats.fastestVoter?.name, accent: 'speed',
+      value: stats.fastestVoter ? `Média: ${formatDuration(stats.fastestVoter.averageVoteDelaySeconds)}` : '',
+      description: stats.fastestVoter
+        ? `Baseado em ${stats.fastestVoter.validTimingSamples} enquetes com criação e voto válidos.`
+        : `São necessárias ${stats.minimumBehaviorSample} enquetes com timestamps válidos.`
+    }),
+    renderStatCard({
+      icon: '🚀', title: 'Primeiro a votar', name: timingNames(first), accent: 'first',
+      value: first ? plural(first.count, 'vez', 'vezes') : '',
+      description: first
+        ? `${first.count} de ${first.eligiblePolls} enquetes elegíveis. Empates exatos creditam todos.`
+        : 'Nenhuma enquete possui timestamp de voto válido disponível.'
+    }),
+    renderStatCard({
+      icon: '🐢', title: 'Último a chegar', name: timingNames(last), accent: 'last',
+      value: last ? plural(last.count, 'vez', 'vezes') : '',
+      description: last
+        ? `${last.count} de ${last.eligiblePolls} enquetes elegíveis. É o último voto entre os recuperados.`
+        : 'Nenhuma enquete possui timestamp de voto válido disponível.'
+    })
+  );
+}
+
+function renderConnections(stats) {
+  const pair = stats.mostOppositePair;
+  elements.connectionCards.replaceChildren(renderStatCard({
+    icon: '⚔️', title: 'Dupla mais oposta',
+    name: pair?.members.map((member) => member.name).join(' × '),
+    value: pair ? formatPercent(pair.oppositionRate) : '',
+    description: pair
+      ? `${plural(pair.pollsTogether, 'enquete em comum', 'enquetes em comum')}; a oposição é o inverso da sincronia média.`
+      : `Não há pares em que ambos participaram de mais de ${formatPercent(stats.minimumBehaviorParticipationRate)} das enquetes e possuem ${stats.minimumPairSample} enquetes em comum.`,
+    explanation: `Resultado do primeiro lugar no ranking de oposição. Compara todas as opções escolhidas por Jaccard; ambos precisam participar de mais de ${formatPercent(stats.minimumBehaviorParticipationRate)} das enquetes.`,
+    accent: 'opposite'
+  }));
+
+  elements.affinityRankings.replaceChildren(
+    renderAffinityRanking({
+      icon: '🤝',
+      title: 'Mais sincronizados',
+      ranking: stats.similarityRanking,
+      scoreKey: 'similarityRate',
+      scoreLabel: 'de sincronia',
+      accent: 'similarity'
+    }),
+    renderAffinityRanking({
+      icon: '⚔️',
+      title: 'Mais opostos',
+      ranking: stats.oppositionRanking,
+      scoreKey: 'oppositionRate',
+      scoreLabel: 'de oposição',
+      accent: 'opposition'
+    })
+  );
+}
+
+function renderAffinityRanking({ icon, title, ranking, scoreKey, scoreLabel, accent }) {
+  const panel = makeElement('article', `card affinity-ranking ${accent}`);
+  const heading = makeElement('div', 'affinity-heading');
+  heading.append(makeElement('span', 'person-stat-icon', icon), makeElement('h3', '', title));
+  panel.appendChild(heading);
+
+  if (!ranking?.length) {
+    panel.append(
+      makeElement('strong', 'affinity-empty-title', 'Ainda não há duplas elegíveis para este ranking.'),
+      makeElement('p', 'affinity-empty-copy', 'Cada participante precisa ter votado em mais de 20% das enquetes analisadas e a dupla precisa ter pelo menos 5 enquetes em comum.')
+    );
+    return panel;
+  }
+
+  const list = makeElement('ol', 'affinity-list');
+  ranking.forEach((pair, index) => {
+    const item = makeElement('li', `affinity-row${index >= 5 ? ' affinity-extra' : ''}`);
+    const identity = makeElement('div', 'affinity-identity');
+    identity.append(
+      makeElement('strong', '', pair.members.map((member) => member.name).join(' + ')),
+      makeElement('small', '', plural(pair.pollsTogether, 'enquete em comum', 'enquetes em comum'))
+    );
+    const score = makeElement('div', 'affinity-score');
+    score.append(
+      makeElement('strong', '', formatPercent(pair[scoreKey])),
+      makeElement('small', '', scoreLabel)
+    );
+    const track = makeElement('span', 'affinity-track');
+    const fill = makeElement('span', 'affinity-fill');
+    fill.style.width = `${Math.max(0, Math.min(100, pair[scoreKey]))}%`;
+    track.appendChild(fill);
+    item.append(makeElement('span', 'affinity-position', `#${index + 1}`), identity, score, track);
+    list.appendChild(item);
+  });
+  panel.appendChild(list);
+
+  if (ranking.length > 5) {
+    const toggle = makeElement('button', 'affinity-toggle', 'Ver ranking completo');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.addEventListener('click', () => {
+      const expanded = panel.classList.toggle('expanded');
+      toggle.textContent = expanded ? 'Mostrar somente Top 5' : 'Ver ranking completo';
+      toggle.setAttribute('aria-expanded', String(expanded));
+    });
+    panel.appendChild(toggle);
+  }
+  return panel;
 }
 
 function renderRanking(stats) {
@@ -117,36 +278,37 @@ function renderRanking(stats) {
   }
   elements.ranking.replaceChildren(...stats.participationRanking.map((member, index) => {
     const row = makeElement('li', 'ranking-row');
-    const position = makeElement('span', 'ranking-position', `${index + 1}`);
     const identity = makeElement('div', 'ranking-identity');
     identity.append(makeElement('strong', '', member.name), makeElement('small', '', `${member.pollsParticipated} / ${stats.summary.eligiblePolls}`));
     const progress = makeElement('div', 'ranking-progress');
     const bar = makeElement('span', 'ranking-progress-bar');
     bar.style.width = `${Math.max(0, Math.min(100, member.participationRate))}%`;
     progress.appendChild(bar);
-    row.append(position, identity, progress, makeElement('strong', 'ranking-rate', formatPercent(member.participationRate)));
+    row.append(
+      makeElement('span', 'ranking-position', `${index + 1}`), identity, progress,
+      makeElement('strong', 'ranking-rate', formatPercent(member.participationRate))
+    );
     return row;
   }));
 }
 
 function pollCard(icon, title, poll, type) {
-  const card = makeElement('article', 'card poll-stat-card');
+  const card = makeElement('article', 'card stat-card poll-stat-card');
   const heading = makeElement('div', 'person-stat-heading');
   heading.append(makeElement('span', 'person-stat-icon', icon), makeElement('h3', '', title));
   card.appendChild(heading);
   if (!poll) {
     card.append(makeElement('strong', 'insufficient', 'Dados insuficientes'));
-    const rule = type === 'closest'
+    card.append(makeElement('p', 'person-stat-description', type === 'closest'
       ? 'É preciso haver ao menos 3 participantes e 2 opções votadas.'
-      : 'Nenhuma enquete com dados de votos foi encontrada.';
-    card.append(makeElement('p', 'person-stat-description', rule));
+      : 'Nenhuma enquete com dados de votos foi encontrada.'));
     return card;
   }
   card.append(makeElement('strong', 'poll-stat-question', `“${poll.question}”`));
   if (type === 'highest') {
     card.append(
-      makeElement('span', 'poll-stat-main-value', `${poll.participantCount} ${poll.participantCount === 1 ? 'participante' : 'participantes'}`),
-      makeElement('p', 'person-stat-description', `${poll.optionCount} ${poll.optionCount === 1 ? 'opção' : 'opções'}`)
+      makeElement('span', 'poll-stat-main-value', plural(poll.participantCount, 'participante', 'participantes')),
+      makeElement('p', 'person-stat-description', plural(poll.optionCount, 'opção', 'opções'))
     );
   } else {
     const results = makeElement('div', 'closest-results');
@@ -155,20 +317,93 @@ function pollCard(icon, title, poll, type) {
       row.append(makeElement('span', '', option.name), makeElement('strong', '', option.voteCount));
       results.appendChild(row);
     });
-    card.append(results, makeElement('p', 'poll-difference', `Diferença: ${poll.difference} ${poll.difference === 1 ? 'voto' : 'votos'}`));
+    card.append(results, makeElement('p', 'poll-difference', `Diferença: ${plural(poll.difference, 'voto', 'votos')}`));
   }
   return card;
+}
+
+function renderPolls(stats) {
+  const top = stats.topPollCreator;
+  const least = stats.leastPollCreator;
+  elements.pollCards.replaceChildren(
+    pollCard('🔥', 'Maior participação', stats.highestParticipationPoll, 'highest'),
+    pollCard('⚔️', 'Enquete mais disputada', stats.closestPoll, 'closest'),
+    renderStatCard({
+      icon: '📝', title: 'Mestre das enquetes', name: top?.name, accent: 'creator',
+      value: top ? plural(top.pollsCreated, 'enquete', 'enquetes') : '',
+      description: top
+        ? `${formatPercent(top.percentage)} das enquetes com autor identificado.`
+        : 'Não foi possível identificar autores neste histórico.'
+    }),
+    renderStatCard({
+      icon: '💤', title: 'Criador mais raro', name: least?.name,
+      value: least ? plural(least.pollsCreated, 'enquete', 'enquetes') : '',
+      description: least
+        ? 'Quem criou menos enquetes entre os criadores identificados.'
+        : stats.onlyOneIdentifiedCreator
+          ? 'Só foi identificado um criador de enquetes neste histórico.'
+          : 'Não foi possível identificar autores suficientes.',
+      emptyTitle: stats.onlyOneIdentifiedCreator ? 'Um único criador' : 'Dados insuficientes'
+    })
+  );
+}
+
+function distributionRows(items) {
+  const wrapper = makeElement('div', 'distribution');
+  const max = Math.max(1, ...items.map((item) => item.count));
+  items.forEach((item) => {
+    const row = makeElement('div', 'distribution-row');
+    const track = makeElement('span', 'distribution-track');
+    const fill = makeElement('span', 'distribution-fill');
+    fill.style.width = `${(item.count / max) * 100}%`;
+    track.appendChild(fill);
+    row.append(
+      makeElement('span', 'distribution-label', item.shortLabel || item.label),
+      track,
+      makeElement('strong', 'distribution-value', numberFormatter.format(item.count))
+    );
+    wrapper.appendChild(row);
+  });
+  return wrapper;
+}
+
+function activityCard(icon, title, result, items, value, description) {
+  const card = renderStatCard({ icon, title, name: result?.name, value, description, accent: 'activity' });
+  if (result && items?.length) card.appendChild(distributionRows(items));
+  return card;
+}
+
+function renderActivity(stats) {
+  const day = stats.mostActiveDay;
+  const prime = stats.primeTime;
+  elements.activityCards.replaceChildren(
+    activityCard(
+      '📅', 'Dia mais ativo', day ? { name: day.name[0].toLocaleUpperCase('pt-BR') + day.name.slice(1) } : null,
+      day?.distribution,
+      day ? plural(day.count, 'participação', 'participações') : '',
+      day ? `${formatPercent(day.percentage)} de toda a atividade com horário disponível.`
+        : 'Nenhum voto possui timestamp válido disponível.'
+    ),
+    activityCard(
+      '🕐', 'Horário nobre', prime ? { name: prime.rangeLabel } : null,
+      prime?.topHours.map((hour) => ({ ...hour, shortLabel: hour.label })),
+      prime ? plural(prime.count, 'participação', 'participações') : '',
+      prime ? 'Faixa de uma hora com mais participações recuperadas.'
+        : 'Nenhum voto possui timestamp válido disponível.'
+    )
+  );
 }
 
 function renderStats(stats) {
   elements.groupName.textContent = stats.summary.group?.name || 'Grupo sem nome';
   renderSummary(stats.summary);
-  renderPeople(stats);
+  renderParticipation(stats);
   renderRanking(stats);
-  elements.pollCards.replaceChildren(
-    pollCard('🔥', 'Maior participação', stats.highestParticipationPoll, 'highest'),
-    pollCard('⚔️', 'Enquete mais disputada', stats.closestPoll, 'closest')
-  );
+  renderBehavior(stats);
+  renderSpeed(stats);
+  renderConnections(stats);
+  renderPolls(stats);
+  renderActivity(stats);
   elements.content.hidden = false;
 }
 

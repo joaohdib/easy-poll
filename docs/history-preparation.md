@@ -25,7 +25,7 @@ usada por `Chat#fetchMessages`: `loadEarlierMsgs({ chat })`.
 
 Após cada chamada, o EasyPoll aguarda 1,5 segundo e mede novamente os modelos não
 notificativos em `chat.msgs`. A preparação termina ao atingir o alvo escolhido (até
-15000), após três tentativas sem crescimento, após dez minutos, por cancelamento ou
+500000), após três tentativas sem crescimento, após dez minutos, por cancelamento ou
 por erro.
 
 A contagem é conservadora: representa modelos disponíveis na coleção do chat nesta

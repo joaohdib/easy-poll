@@ -2,7 +2,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { WhatsAppService } = require('../src/whatsapp');
+const {
+  WhatsAppService,
+  POLL_SCAN_MAX_LIMIT,
+  HISTORY_PREPARE_MAX_LIMIT
+} = require('../src/whatsapp');
+
+test('allows history preparation and poll scanning limits up to 500,000 messages', () => {
+  assert.equal(POLL_SCAN_MAX_LIMIT, 500_000);
+  assert.equal(HISTORY_PREPARE_MAX_LIMIT, 500_000);
+});
 
 function makeService(counts) {
   const service = Object.create(WhatsAppService.prototype);
