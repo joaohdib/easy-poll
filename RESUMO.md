@@ -122,8 +122,13 @@ Exemplo do corpo da análise experimental:
 
 ## Estrutura principal
 
-- `src/server.ts` — servidor Express, endpoints e validações.
-- `src/whatsapp.ts` — conexão, grupos, membros, envio e análise experimental de enquetes.
+- `src/server.ts` — configuração do Express, montagem das rotas e bootstrap.
+- `src/domain/types.ts` — contratos internos compartilhados do EasyPoll.
+- `src/routes/` — endpoints HTTP agrupados por responsabilidade e validações de entrada.
+- `src/services/whatsapp.service.ts` — conexão e fronteira de compatibilidade com WhatsApp Web.
+- `src/services/poll.service.ts` — normalização de enquetes, opções, autores e votos.
+- `src/services/history.service.ts` — preparação e scan do histórico disponível na sessão.
+- `src/services/stats.service.ts` — cálculos estatísticos sobre dados normalizados.
 - `public/index.html` — estrutura da interface.
 - `public/styles.css` — estilos responsivos.
 - `public/app.js` — interação da interface com a API.

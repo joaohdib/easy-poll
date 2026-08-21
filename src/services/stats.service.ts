@@ -1,3 +1,10 @@
+import type {
+  MemberIdentity,
+  PollAnalysis,
+  PollAnalysisInput,
+  StatsResult
+} from '../domain/types';
+
 const MIN_BEHAVIOR_SAMPLE = 3;
 const MIN_EXTENDED_SAMPLE = 5;
 const MIN_PAIR_SAMPLE = 5;
@@ -7,75 +14,6 @@ const DAY_NAMES: ReadonlyArray<readonly [string, string]> = Object.freeze([
   ['segunda-feira', 'Seg'], ['terça-feira', 'Ter'], ['quarta-feira', 'Qua'],
   ['quinta-feira', 'Qui'], ['sexta-feira', 'Sex'], ['sábado', 'Sáb'], ['domingo', 'Dom']
 ]);
-
-interface SerializedIdLike {
-  _serialized?: unknown;
-}
-
-interface RawVote {
-  voterId?: unknown;
-  voterName?: unknown;
-  name?: unknown;
-  selectedOptions?: unknown;
-  voteTimestamp?: unknown;
-  timestamp?: unknown;
-}
-
-interface RawPoll {
-  messageId?: unknown;
-  question?: unknown;
-  timestamp?: unknown;
-  options?: unknown;
-  votesAvailable?: unknown;
-  votes?: RawVote[];
-  creatorId?: unknown;
-  creatorName?: unknown;
-  authorId?: unknown;
-  authorName?: unknown;
-  author?: unknown;
-  participant?: unknown;
-  participantName?: unknown;
-  from?: unknown;
-  fromName?: unknown;
-}
-
-export interface PollScanInput {
-  group?: { id?: unknown; name?: unknown };
-  pollsFound?: number;
-  polls?: RawPoll[];
-}
-
-interface OrderedParticipant {
-  userId: string;
-  name: string;
-  selectedOptions: string[];
-  voteTimestamp: number | null;
-  order: number;
-}
-
-interface PollParticipant extends Omit<OrderedParticipant, 'order'> {}
-
-interface NormalizedPoll {
-  id: string;
-  question: string;
-  timestamp: number | null;
-  options: string[];
-  votesAvailable: boolean;
-  participants: PollParticipant[];
-  votes: Array<{
-    voterId: string;
-    voterName: string;
-    selectedOptions: string[];
-    timestamp: number | null;
-  }>;
-  creatorId: string | null;
-  creatorName: string | null;
-}
-
-interface MemberIdentity {
-  id: string;
-  name: string;
-}
 
 interface MemberAccumulator extends MemberIdentity {
   pollsParticipated: number;
@@ -134,114 +72,14 @@ interface NamedPair {
   members: MemberIdentity[];
 }
 
-function cleanString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function validTimestamp(value: unknown): number | null {
-  const timestamp = Number(value);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
-  const seconds = timestamp > 10_000_000_000 ? Math.floor(timestamp / 1000) : Math.floor(timestamp);
-  return Number.isFinite(new Date(seconds * 1000).getTime()) ? seconds : null;
-}
-
 function maskWhatsAppId(value: unknown): string {
-  const id = cleanString(value);
+  const id = typeof value === 'string' ? value.trim() : '';
   if (!id) return 'Participante não identificado';
   const number = id.split('@')[0];
   return `••••${number.length <= 4 ? number : number.slice(-4)}`;
 }
 
-function displayName(name: unknown, id: unknown): string {
-  return cleanString(name) || maskWhatsAppId(id);
-}
-
-function normalizeWhatsAppId(value: unknown): string {
-  if (typeof value === 'string') return cleanString(value);
-  if (isRecord(value) && typeof value._serialized === 'string') return cleanString(value._serialized);
-  return '';
-}
-
-function normalizeCreator(poll: RawPoll): Pick<NormalizedPoll, 'creatorId' | 'creatorName'> {
-  const explicitId = normalizeWhatsAppId(poll?.creatorId)
-    || normalizeWhatsAppId(poll?.authorId)
-    || normalizeWhatsAppId(poll?.author);
-  const contextualId = normalizeWhatsAppId(poll?.participant)
-    || normalizeWhatsAppId(poll?.from);
-  const candidateId = explicitId || (contextualId.endsWith('@g.us') ? '' : contextualId);
-  if (!candidateId || candidateId.endsWith('@g.us')) return { creatorId: null, creatorName: null };
-  return {
-    creatorId: candidateId,
-    creatorName: displayName(
-      poll?.creatorName || poll?.authorName || poll?.participantName || poll?.fromName,
-      candidateId
-    )
-  };
-}
-
-function normalizePolls(scan: PollScanInput): NormalizedPoll[] {
-  const sourcePolls = Array.isArray(scan?.polls) ? scan.polls : [];
-  const seenMessageIds = new Set<string>();
-
-  return sourcePolls.flatMap((poll, pollIndex) => {
-    const messageId = cleanString(poll?.messageId);
-    if (messageId && seenMessageIds.has(messageId)) return [];
-    if (messageId) seenMessageIds.add(messageId);
-    const options = [...new Set((Array.isArray(poll?.options) ? poll.options : [])
-      .map(cleanString).filter(Boolean))];
-    const validOptions = new Set(options);
-    const votesByMember = new Map<string, OrderedParticipant>();
-
-    if (poll?.votesAvailable && Array.isArray(poll.votes)) {
-      poll.votes.forEach((vote, voteIndex) => {
-        const voterId = normalizeWhatsAppId(vote?.voterId);
-        if (!voterId) return;
-        const candidate = {
-          userId: voterId,
-          name: displayName(vote?.voterName || vote?.name, voterId),
-          selectedOptions: [...new Set((Array.isArray(vote?.selectedOptions)
-            ? vote.selectedOptions : []).map(cleanString).filter((name) => validOptions.has(name)))],
-          voteTimestamp: validTimestamp(vote?.voteTimestamp ?? vote?.timestamp),
-          order: voteIndex
-        };
-        const previous = votesByMember.get(voterId);
-        if (!previous || isLaterVote(candidate, previous)) votesByMember.set(voterId, candidate);
-      });
-    }
-
-    const participants = [...votesByMember.values()]
-      .filter((participant) => participant.selectedOptions.length > 0)
-      .map(({ order: _order, ...participant }) => participant);
-    const creator = normalizeCreator(poll);
-    return [{
-      id: messageId || `poll-${pollIndex}`,
-      question: cleanString(poll?.question) || 'Enquete sem pergunta disponível',
-      timestamp: validTimestamp(poll?.timestamp),
-      options,
-      votesAvailable: poll?.votesAvailable === true,
-      participants,
-      // Alias mantido para consumidores e testes anteriores.
-      votes: participants.map((participant) => ({
-        voterId: participant.userId,
-        voterName: participant.name,
-        selectedOptions: participant.selectedOptions,
-        timestamp: participant.voteTimestamp
-      })),
-      ...creator
-    }];
-  });
-}
-
-function isLaterVote(candidate: OrderedParticipant, previous: OrderedParticipant): boolean {
-  if (candidate.voteTimestamp !== null && previous.voteTimestamp !== null) {
-    return candidate.voteTimestamp >= previous.voteTimestamp;
-  }
-  if (candidate.voteTimestamp !== null && previous.voteTimestamp === null) return true;
-  if (candidate.voteTimestamp === null && previous.voteTimestamp !== null) return false;
-  return candidate.order >= previous.order;
-}
-
-function getPollOutcome(poll: NormalizedPoll) {
+function getPollOutcome(poll: PollAnalysis) {
   const optionCounts = new Map((poll?.options || []).map((option) => [option, 0]));
   (poll?.participants || poll?.votes || []).forEach((participant) => {
     participant.selectedOptions.forEach((option) => {
@@ -268,7 +106,7 @@ function getPollOutcome(poll: NormalizedPoll) {
   };
 }
 
-function calculatePollStats(scan: PollScanInput, options: StatsOptions = {}) {
+function calculatePollStats(scan: PollAnalysisInput, options: StatsOptions = {}): StatsResult {
   const minimumSample = positiveInteger(options.minimumSample) || MIN_BEHAVIOR_SAMPLE;
   const minimumExtendedSample = positiveInteger(options.minimumExtendedSample)
     || positiveInteger(options.minimumSample) || MIN_EXTENDED_SAMPLE;
@@ -276,7 +114,7 @@ function calculatePollStats(scan: PollScanInput, options: StatsOptions = {}) {
     || positiveInteger(options.minimumSample) || MIN_PAIR_SAMPLE;
   const minimumBehaviorParticipationRate = validPercentage(options.minimumBehaviorParticipationRate)
     ?? MIN_BEHAVIOR_PARTICIPATION_RATE;
-  const polls = normalizePolls(scan);
+  const polls = scan.polls;
   const eligiblePolls = polls.filter((poll) => poll.votesAvailable);
   const members = new Map<string, MemberAccumulator>();
   const pollResults: PollResult[] = [];
@@ -435,10 +273,8 @@ function calculatePollStats(scan: PollScanInput, options: StatsOptions = {}) {
 
   return {
     summary: {
-      group: scan?.group && typeof scan.group === 'object'
-        ? { id: cleanString(scan.group.id), name: cleanString(scan.group.name) || 'Grupo sem nome' }
-        : null,
-      pollsFound: Number.isInteger(scan?.pollsFound) ? scan.pollsFound : polls.length,
+      group: scan.group,
+      pollsFound: scan.pollsFound,
       eligiblePolls: denominator,
       totalParticipations,
       identifiedParticipants: ranking.length,
@@ -477,7 +313,7 @@ function calculatePollStats(scan: PollScanInput, options: StatsOptions = {}) {
   };
 }
 
-function calculateCreatorStats(polls: NormalizedPoll[]) {
+function calculateCreatorStats(polls: PollAnalysis[]) {
   const creators = new Map<string, { id: string; name: string; pollsCreated: number }>();
   let pollsWithIdentifiedCreator = 0;
   polls.forEach((poll) => {
@@ -547,7 +383,7 @@ function jaccardSimilarity(
 }
 
 function calculatePairAffinity(
-  polls: NormalizedPoll[],
+  polls: PollAnalysis[],
   participationRanking: ParticipationMember[],
   options: PairOptions = {}
 ) {
@@ -681,16 +517,11 @@ function comparePairNames(a: NamedPair, b: NamedPair): number {
   return label(a).localeCompare(label(b), 'pt-BR', { sensitivity: 'base' });
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 export {
   calculatePollStats,
   calculatePairAffinity,
   getParticipationEligibleMembers,
   jaccardSimilarity,
-  normalizePolls,
   getPollOutcome,
   MIN_BEHAVIOR_SAMPLE,
   MIN_EXTENDED_SAMPLE,

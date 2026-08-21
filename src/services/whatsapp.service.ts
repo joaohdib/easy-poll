@@ -2,8 +2,9 @@ import path from 'node:path';
 import QRCode from 'qrcode';
 import WhatsAppWeb = require('whatsapp-web.js');
 import type { Chat as ChatInstance, Message } from 'whatsapp-web.js';
+import type { Group, Member, SendPollInput } from '../domain/types';
 
-const { Client, LocalAuth, MessageTypes, Poll } = WhatsAppWeb;
+const { Client, LocalAuth, Poll } = WhatsAppWeb;
 const ChatConstructor = (WhatsAppWeb as unknown as {
   Chat: new (client: InstanceType<typeof Client>, data: Record<string, unknown>) => ChatInstance;
 }).Chat;
@@ -19,18 +20,6 @@ declare global {
 
 interface CodedError extends Error {
   code?: string;
-}
-
-interface GroupSummary {
-  id: string;
-  name: string;
-}
-
-interface GroupMember {
-  id: string;
-  name: string;
-  numberHint: string | null;
-  profilePicUrl: string | null;
 }
 
 interface BrowserMember {
@@ -77,112 +66,24 @@ interface SerializedPollId {
   serialized: string;
 }
 
-interface SendPollInput {
-  groupId: string;
-  question: string;
-  options: string[];
-  allowMultipleAnswers: boolean;
-}
-
 interface PollOptionLike {
   name?: unknown;
   localId?: unknown;
 }
 
-type PollMessage = Omit<Message, 'id' | 'pollOptions'> & {
+export type PollMessage = Omit<Message, 'id' | 'pollOptions'> & {
   id: { id?: unknown; _serialized?: string; toString?: () => string };
   pollOptions: Array<string | PollOptionLike>;
   participant?: unknown;
 };
 
-interface RecoveredVote {
+export interface RecoveredVote {
   voterId: string | null;
   selectedOptionIds: unknown[];
   selectedOptions: string[];
   timestamp: number | null;
 }
 
-interface PollScanVote {
-  voterId: string | null;
-  voterName: string | null;
-  selectedOptionIds: unknown[];
-  selectedOptions: string[];
-  timestamp: number | null;
-}
-
-interface ScannedPoll {
-  messageId: string | null;
-  question: string;
-  timestamp: number | null;
-  creatorId: string | null;
-  creatorName: string | null;
-  options: string[];
-  allowMultipleAnswers: boolean;
-  votes: PollScanVote[];
-  voteCount: number;
-  votesAvailable: boolean;
-  votesError: string | null;
-}
-
-export interface PollScanResult {
-  group: GroupSummary;
-  requestedLimit: number;
-  messagesScanned: number;
-  pollsFound: number;
-  pollsWithVotesAvailable: number;
-  messageTypes: Record<string, number>;
-  polls: ScannedPoll[];
-}
-
-type HistoryPreparationStatus =
-  | 'preparing'
-  | 'completed'
-  | 'stabilized'
-  | 'cancelled'
-  | 'timeout'
-  | 'error';
-
-interface HistoryPreparationJob {
-  token: symbol;
-  groupId: string;
-  status: HistoryPreparationStatus;
-  messagesAvailable: number;
-  initialMessagesAvailable: number;
-  attempts: number;
-  noGrowthAttempts: number;
-  target: number;
-  strategy: string;
-  detail: string;
-  startedAt: string;
-  updatedAt: string;
-  finishedAt?: string;
-  error?: string;
-  cancelRequested: boolean;
-}
-
-interface SerializedHistoryPreparation {
-  status: HistoryPreparationStatus;
-  groupId: string;
-  messagesAvailable: number;
-  initialMessagesAvailable: number;
-  attempts: number;
-  noGrowthAttempts: number;
-  target: number;
-  strategy: string;
-  detail: string;
-  startedAt: string;
-  updatedAt: string;
-  finishedAt: string | null;
-  error: string | null;
-}
-
-const POLL_SCAN_DEFAULT_LIMIT = 1000;
-const POLL_SCAN_MAX_LIMIT = 500_000;
-const HISTORY_PREPARE_DEFAULT_LIMIT = 1000;
-const HISTORY_PREPARE_MAX_LIMIT = 500_000;
-const HISTORY_PREPARE_TIMEOUT_MS = 10 * 60 * 1000;
-const HISTORY_PREPARE_DELAY_MS = 15;
-const HISTORY_PREPARE_STABLE_ATTEMPTS = 3;
 const INITIALIZATION_MAX_RETRIES = 2;
 const INITIALIZATION_RETRY_DELAY_MS = 1500;
 
@@ -200,14 +101,9 @@ class WhatsAppService {
   lastError: string | null;
   initialized: boolean;
   clientGeneration: number;
-  pollScanInProgress: boolean;
-  activeHistoryPreparation: HistoryPreparationJob | null;
-  historyPreparationByGroup: Map<string, HistoryPreparationJob>;
-  historyPrepareTimeoutMs: number;
-  historyPrepareDelayMs: number;
-  historyPrepareStableAttempts: number;
   initializationRetryCount: number;
   initializationRetryTimer: ReturnType<typeof setTimeout> | null;
+  connectionLostListeners: Set<() => void>;
   client!: InstanceType<typeof Client>;
 
   constructor() {
@@ -216,14 +112,9 @@ class WhatsAppService {
     this.lastError = null;
     this.initialized = false;
     this.clientGeneration = 0;
-    this.pollScanInProgress = false;
-    this.activeHistoryPreparation = null;
-    this.historyPreparationByGroup = new Map();
-    this.historyPrepareTimeoutMs = HISTORY_PREPARE_TIMEOUT_MS;
-    this.historyPrepareDelayMs = HISTORY_PREPARE_DELAY_MS;
-    this.historyPrepareStableAttempts = HISTORY_PREPARE_STABLE_ATTEMPTS;
     this.initializationRetryCount = 0;
     this.initializationRetryTimer = null;
+    this.connectionLostListeners = new Set();
     this.createClient();
   }
 
@@ -286,7 +177,7 @@ class WhatsAppService {
 
     client.on('auth_failure', (message: string) => {
       if (!isCurrentClient()) return;
-      this.cancelActiveHistoryPreparation('cancelled');
+      this.notifyConnectionLost();
       this.status = CONNECTION_STATUS.AUTH_FAILURE;
       this.qrDataUrl = null;
       this.lastError = 'Falha ao autenticar a sessão do WhatsApp.';
@@ -295,7 +186,7 @@ class WhatsAppService {
 
     client.on('disconnected', (reason: string) => {
       if (!isCurrentClient()) return;
-      this.cancelActiveHistoryPreparation('cancelled');
+      this.notifyConnectionLost();
       this.status = CONNECTION_STATUS.DISCONNECTED;
       this.qrDataUrl = null;
       this.lastError = `WhatsApp desconectado${reason ? `: ${reason}` : '.'}`;
@@ -371,6 +262,22 @@ class WhatsAppService {
     return this.qrDataUrl;
   }
 
+  onConnectionLost(listener: () => void): () => void {
+    this.connectionLostListeners.add(listener);
+    return () => this.connectionLostListeners.delete(listener);
+  }
+
+  notifyConnectionLost(): void {
+    this.connectionLostListeners.forEach((listener) => listener());
+  }
+
+  getOwnIdentity(): { id: string | null; name: string | null } {
+    return {
+      id: this.client.info?.wid?._serialized || null,
+      name: this.client.info?.pushname || null
+    };
+  }
+
   ensureConnected(): void {
     if (this.status !== CONNECTION_STATUS.CONNECTED) {
       const error = new Error('WhatsApp ainda não está conectado.') as CodedError;
@@ -381,7 +288,7 @@ class WhatsAppService {
 
   async logout() {
     this.ensureConnected();
-    this.cancelActiveHistoryPreparation('cancelled');
+    this.notifyConnectionLost();
     const client = this.client;
     this.status = CONNECTION_STATUS.CONNECTING;
     this.qrDataUrl = null;
@@ -404,14 +311,14 @@ class WhatsAppService {
     return this.getStatus();
   }
 
-  async getGroups(): Promise<GroupSummary[]> {
+  async getGroups(): Promise<Group[]> {
     this.ensureConnected();
     // getChats() serializa todos os tipos de conversa e pode falhar por causa
     // de um único chat incompatível. O MVP só precisa destes dois campos.
-    const groups: GroupSummary[] = await this.client.pupPage.evaluate(() => {
+    const groups: Group[] = await this.client.pupPage.evaluate(() => {
       const chats: BrowserChat[] = window.require('WAWebCollections').Chat.getModelsArray();
 
-      return chats.flatMap((chat: BrowserChat): GroupSummary[] => {
+      return chats.flatMap((chat: BrowserChat): Group[] => {
         try {
           const id = chat.id?._serialized || chat.id?.toString?.();
           const isGroup = Boolean(chat.groupMetadata)
@@ -433,7 +340,7 @@ class WhatsAppService {
       .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }
 
-  async getGroupMembers(groupId: string): Promise<{ members: GroupMember[]; totalMembers: number }> {
+  async getGroupMembers(groupId: string): Promise<{ members: Member[]; totalMembers: number }> {
     this.ensureConnected();
 
     const groups = await this.getGroups();
@@ -507,7 +414,7 @@ class WhatsAppService {
       throw error;
     }
 
-    const members: GroupMember[] = result.members.map((member, index) => ({
+    const members: Member[] = result.members.map((member, index) => ({
       id: String(member.id),
       name: String(member.name || `Participante ${index + 1}`).trim().slice(0, 100)
         || `Participante ${index + 1}`,
@@ -584,31 +491,10 @@ class WhatsAppService {
     return { messageId: message?.id?._serialized || null };
   }
 
-  async scanGroupPolls(
+  async fetchGroupMessages(
     groupId: string,
-    limit = POLL_SCAN_DEFAULT_LIMIT
-  ): Promise<PollScanResult> {
-    this.ensureConnected();
-    if (this.activeHistoryPreparation) {
-      const error = new Error('Aguarde a preparação do histórico terminar antes de analisar as enquetes.') as CodedError;
-      error.code = 'HISTORY_PREPARE_BUSY';
-      throw error;
-    }
-    if (this.pollScanInProgress) {
-      const error = new Error('Já existe uma análise de enquetes em andamento. Aguarde a conclusão.') as CodedError;
-      error.code = 'POLL_SCAN_BUSY';
-      throw error;
-    }
-
-    this.pollScanInProgress = true;
-    try {
-      return await this.performGroupPollScan(groupId, limit);
-    } finally {
-      this.pollScanInProgress = false;
-    }
-  }
-
-  async performGroupPollScan(groupId: string, limit: number): Promise<PollScanResult> {
+    limit: number
+  ): Promise<{ group: Group; messages: Message[] }> {
     const groups = await this.getGroups();
     const group = groups.find((candidate) => candidate.id === groupId);
     if (!group) {
@@ -639,220 +525,7 @@ class WhatsAppService {
       error.code = 'POLL_MESSAGES_FETCH_FAILED';
       throw error;
     }
-    const typeCounts = messages.reduce<Record<string, number>>((counts, message) => {
-      const type = String(message.type || 'unknown');
-      counts[type] = (counts[type] || 0) + 1;
-      return counts;
-    }, {});
-    console.log('[WhatsApp] Types returned:', typeCounts);
-
-    const pollMessages = messages.filter(
-      (message) => message.type === MessageTypes.POLL_CREATION
-    ) as PollMessage[];
-    await this.hydratePollMessageIds(groupId, pollMessages);
-    // Reaproveita a resolução de nomes já usada pelo seletor de membros.
-    let members: GroupMember[] = [];
-    if (pollMessages.length) {
-      try {
-        ({ members } = await this.getGroupMembers(groupId));
-      } catch (error) {
-        console.warn('[WhatsApp] Poll scan could not resolve group member names:', getErrorMessage(error));
-      }
-    }
-    const namesById = new Map<string, string>(members.map((member) => [member.id, member.name]));
-    const ownId = this.client.info?.wid?._serialized || null;
-    if (ownId && this.client.info?.pushname) namesById.set(ownId, this.client.info.pushname);
-
-    const polls: ScannedPoll[] = [];
-    let pollsWithVotesAvailable = 0;
-    for (const message of pollMessages) {
-      const contextualCreatorId = normalizeWhatsAppId(message.participant)
-        || normalizeWhatsAppId(message.from);
-      const creatorId = normalizeWhatsAppId(message.author)
-        || (message.fromMe ? ownId : null)
-        || (contextualCreatorId && !contextualCreatorId.endsWith('@g.us') ? contextualCreatorId : null);
-      const messageId = normalizeWhatsAppId(message.id);
-      const poll: ScannedPoll = {
-        messageId,
-        question: cleanText(message.pollName, 500) || 'Enquete sem pergunta disponível',
-        timestamp: Number(message.timestamp) || null,
-        creatorId,
-        creatorName: resolveKnownName(creatorId, namesById),
-        options: normalizePollOptions(message.pollOptions),
-        allowMultipleAnswers: Boolean(message.allowMultipleAnswers),
-        votes: [],
-        voteCount: 0,
-        votesAvailable: false,
-        votesError: null
-      };
-
-      if (!messageId) {
-        poll.votesError = 'O identificador desta enquete não foi disponibilizado pelo WhatsApp Web.';
-        polls.push(poll);
-        continue;
-      }
-
-      try {
-        const votes = await this.getPollVotesForScan(messageId, message.pollOptions);
-        poll.votes = votes.map((vote) => {
-          const voterId = normalizeWhatsAppId(vote.voterId);
-          return {
-            voterId,
-            voterName: resolveKnownName(voterId, namesById),
-            selectedOptionIds: vote.selectedOptionIds,
-            selectedOptions: vote.selectedOptions,
-            timestamp: normalizeVoteTimestamp(vote.timestamp)
-          };
-        });
-        poll.voteCount = poll.votes.length;
-        poll.votesAvailable = true;
-        pollsWithVotesAvailable += 1;
-      } catch (error) {
-        poll.votesError = cleanText(getErrorMessage(error), 300)
-          || 'O WhatsApp Web não disponibilizou os votos desta enquete.';
-        console.warn(`[WhatsApp] Could not recover votes for poll ${poll.messageId || '(unknown id)'}: ${poll.votesError}`);
-      }
-      polls.push(poll);
-    }
-
-    console.log(`[WhatsApp] Found ${polls.length} poll messages`);
-    console.log(`[WhatsApp] Votes recovered for ${pollsWithVotesAvailable}/${polls.length} polls`);
-    return {
-      group: { id: group.id, name: group.name },
-      requestedLimit: limit,
-      messagesScanned: messages.length,
-      pollsFound: polls.length,
-      pollsWithVotesAvailable,
-      messageTypes: typeCounts,
-      polls
-    };
-  }
-
-  async getGroupHistoryStatus(groupId: string) {
-    this.ensureConnected();
-    const group = await this.findGroup(groupId);
-    const saved = this.historyPreparationByGroup.get(groupId);
-    if (saved) {
-      if (saved.status !== 'preparing') {
-        saved.messagesAvailable = await this.countAvailableGroupMessages(groupId);
-        saved.updatedAt = new Date().toISOString();
-      }
-      return this.serializeHistoryPreparation(saved);
-    }
-
-    const messagesAvailable = await this.countAvailableGroupMessages(groupId);
-    return {
-      status: 'idle',
-      groupId,
-      messagesAvailable,
-      initialMessagesAvailable: messagesAvailable,
-      attempts: 0,
-      noGrowthAttempts: 0,
-      target: null as null,
-      strategy: null as null,
-      detail: 'Histórico disponível nesta sessão.',
-      updatedAt: new Date().toISOString(),
-      groupName: group.name
-    };
-  }
-
-  async startGroupHistoryPreparation(groupId: string, target = HISTORY_PREPARE_DEFAULT_LIMIT) {
-    this.ensureConnected();
-    await this.findGroup(groupId);
-
-    if (this.pollScanInProgress) {
-      const error = new Error('Aguarde a análise de enquetes terminar antes de preparar o histórico.') as CodedError;
-      error.code = 'POLL_SCAN_BUSY';
-      throw error;
-    }
-    if (this.activeHistoryPreparation?.groupId === groupId) {
-      const error = new Error('O histórico deste grupo já está sendo preparado.') as CodedError;
-      error.code = 'HISTORY_PREPARE_BUSY';
-      throw error;
-    }
-    if (this.activeHistoryPreparation) this.cancelActiveHistoryPreparation('cancelled');
-
-    const initialMessagesAvailable = await this.countAvailableGroupMessages(groupId);
-    const job: HistoryPreparationJob = {
-      token: Symbol('history-preparation'),
-      groupId,
-      status: 'preparing',
-      messagesAvailable: initialMessagesAvailable,
-      initialMessagesAvailable,
-      attempts: 0,
-      noGrowthAttempts: 0,
-      target,
-      strategy: 'loadEarlierMsgs internal API (used by Chat#fetchMessages)',
-      detail: 'Buscando mensagens anteriores…',
-      startedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      cancelRequested: false
-    };
-    this.activeHistoryPreparation = job;
-    this.historyPreparationByGroup.set(groupId, job);
-    console.log(`[HistorySync] group=${groupId}`);
-    console.log(`[HistorySync] Initial available messages: ${initialMessagesAvailable}`);
-    console.log(`[HistorySync] Strategy: ${job.strategy}`);
-    this.runGroupHistoryPreparation(job).catch((error) => {
-      console.error(`[HistorySync] Unexpected runner failure group=${groupId}:`, getErrorMessage(error));
-    });
-    return this.serializeHistoryPreparation(job);
-  }
-
-  async runGroupHistoryPreparation(job: HistoryPreparationJob): Promise<void> {
-    const deadline = Date.now() + this.historyPrepareTimeoutMs;
-    try {
-      if (job.messagesAvailable >= job.target) {
-        this.finishHistoryPreparation(job, 'completed', `Limite de ${job.target} mensagens atingido.`);
-        return;
-      }
-
-      while (!job.cancelRequested && Date.now() < deadline) {
-        job.attempts += 1;
-        const before = job.messagesAvailable;
-        const loadResult = await this.loadEarlierGroupMessages(job.groupId);
-        if (job.cancelRequested || this.activeHistoryPreparation?.token !== job.token) break;
-
-        await delay(this.historyPrepareDelayMs);
-        if (job.cancelRequested || this.activeHistoryPreparation?.token !== job.token) break;
-
-        job.messagesAvailable = await this.countAvailableGroupMessages(job.groupId);
-        job.updatedAt = new Date().toISOString();
-        const grew = job.messagesAvailable > before;
-        job.noGrowthAttempts = grew ? 0 : job.noGrowthAttempts + 1;
-        job.detail = grew
-          ? `${job.messagesAvailable - before} novas mensagens ficaram disponíveis na última tentativa.`
-          : `Sem novas mensagens após ${job.noGrowthAttempts} tentativa${job.noGrowthAttempts === 1 ? '' : 's'}.`;
-        console.log(`[HistorySync] Attempt ${job.attempts}: ${job.messagesAvailable} (API returned ${loadResult.loadedMessages})`);
-
-        if (job.messagesAvailable >= job.target) {
-          this.finishHistoryPreparation(job, 'completed', `Limite de ${job.target} mensagens atingido.`);
-          return;
-        }
-        if (job.noGrowthAttempts >= this.historyPrepareStableAttempts) {
-          this.finishHistoryPreparation(
-            job,
-            'stabilized',
-            `Sem novas mensagens após ${this.historyPrepareStableAttempts} tentativas.`
-          );
-          return;
-        }
-      }
-
-      if (job.cancelRequested) {
-        this.finishHistoryPreparation(job, 'cancelled', 'Preparação cancelada.');
-      } else if (Date.now() >= deadline) {
-        this.finishHistoryPreparation(job, 'timeout', 'O limite de tempo de 10 minutos foi atingido.');
-      }
-    } catch (cause) {
-      if (job.cancelRequested) {
-        this.finishHistoryPreparation(job, 'cancelled', 'Preparação cancelada.');
-        return;
-      }
-      console.error(`[HistorySync] Failed group=${job.groupId}:`, getErrorMessage(cause));
-      job.error = 'O WhatsApp Web não conseguiu carregar mensagens anteriores deste grupo.';
-      this.finishHistoryPreparation(job, 'error', job.error);
-    }
+    return { group, messages };
   }
 
   async loadEarlierGroupMessages(groupId: string): Promise<{ loadedMessages: number }> {
@@ -876,7 +549,7 @@ class WhatsAppService {
     }, groupId);
   }
 
-  async findGroup(groupId: string): Promise<GroupSummary> {
+  async findGroup(groupId: string): Promise<Group> {
     const groups = await this.getGroups();
     const group = groups.find((candidate) => candidate.id === groupId);
     if (!group) {
@@ -885,67 +558,6 @@ class WhatsAppService {
       throw error;
     }
     return group;
-  }
-
-  cancelGroupHistoryPreparation(groupId: string) {
-    this.ensureConnected();
-    const job = this.activeHistoryPreparation;
-    if (job?.groupId === groupId) {
-      job.cancelRequested = true;
-      job.updatedAt = new Date().toISOString();
-      job.detail = 'Cancelamento solicitado…';
-      console.log(`[HistorySync] Cancellation requested group=${groupId}`);
-      return this.serializeHistoryPreparation(job);
-    }
-    return this.serializeHistoryPreparation(this.historyPreparationByGroup.get(groupId)) || {
-      status: 'idle',
-      groupId,
-      messagesAvailable: null as null,
-      detail: 'Nenhuma preparação ativa para este grupo.'
-    };
-  }
-
-  cancelActiveHistoryPreparation(status: HistoryPreparationStatus = 'cancelled'): void {
-    const job = this.activeHistoryPreparation;
-    if (!job) return;
-    job.cancelRequested = true;
-    this.finishHistoryPreparation(job, status, 'Preparação cancelada.');
-  }
-
-  finishHistoryPreparation(
-    job: HistoryPreparationJob,
-    status: HistoryPreparationStatus,
-    detail: string
-  ): void {
-    if (job.status !== 'preparing') return;
-    job.status = status;
-    job.detail = detail;
-    job.updatedAt = new Date().toISOString();
-    job.finishedAt = job.updatedAt;
-    if (this.activeHistoryPreparation?.token === job.token) this.activeHistoryPreparation = null;
-    const label = status === 'stabilized' ? 'stabilized' : status;
-    console.log(`[HistorySync] History ${label} at ${job.messagesAvailable} messages (group=${job.groupId})`);
-  }
-
-  serializeHistoryPreparation(
-    job: HistoryPreparationJob | undefined | null
-  ): SerializedHistoryPreparation | null {
-    if (!job) return null;
-    return {
-      status: job.status,
-      groupId: job.groupId,
-      messagesAvailable: job.messagesAvailable,
-      initialMessagesAvailable: job.initialMessagesAvailable,
-      attempts: job.attempts,
-      noGrowthAttempts: job.noGrowthAttempts,
-      target: job.target,
-      strategy: job.strategy,
-      detail: job.detail,
-      startedAt: job.startedAt,
-      updatedAt: job.updatedAt,
-      finishedAt: job.finishedAt || null,
-      error: job.error || null
-    };
   }
 
   async getPollVotesForScan(
@@ -1038,7 +650,7 @@ class WhatsAppService {
   }
 
   async shutdown(): Promise<void> {
-    this.cancelActiveHistoryPreparation('cancelled');
+    this.notifyConnectionLost();
     if (this.initializationRetryTimer) {
       clearTimeout(this.initializationRetryTimer);
       this.initializationRetryTimer = null;
@@ -1062,10 +674,6 @@ function normalizeWhatsAppId(value: unknown): string | null {
     : null;
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 function isTransientInitializationError(error: unknown): boolean {
   const message = getErrorMessage(error).toLocaleLowerCase('en-US');
   return message.includes('execution context was destroyed')
@@ -1076,25 +684,6 @@ function isTransientInitializationError(error: unknown): boolean {
 function cleanText(value: unknown, maxLength: number): string | null {
   if (value === null || value === undefined) return null;
   return String(value).trim().slice(0, maxLength) || null;
-}
-
-function normalizePollOptions(options: unknown): string[] {
-  if (!Array.isArray(options)) return [];
-  return options.map((option) => cleanText(
-    typeof option === 'string' ? option : isRecord(option) ? option.name : undefined,
-    200
-  )).filter(Boolean);
-}
-
-function resolveKnownName(id: string | null, namesById: Map<string, string>): string | null {
-  if (!id) return null;
-  return namesById.get(id) || null;
-}
-
-function normalizeVoteTimestamp(value: unknown): number | null {
-  const timestamp = Number(value);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
-  return timestamp > 10_000_000_000 ? Math.floor(timestamp / 1000) : Math.floor(timestamp);
 }
 
 function getErrorMessage(error: unknown): string {
@@ -1110,9 +699,5 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export {
   WhatsAppService,
   CONNECTION_STATUS,
-  POLL_SCAN_DEFAULT_LIMIT,
-  POLL_SCAN_MAX_LIMIT,
-  HISTORY_PREPARE_DEFAULT_LIMIT,
-  HISTORY_PREPARE_MAX_LIMIT,
   isTransientInitializationError
 };

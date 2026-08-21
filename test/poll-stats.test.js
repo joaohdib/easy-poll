@@ -3,10 +3,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  calculatePollStats,
-  jaccardSimilarity,
+  calculatePollStats: calculateNormalizedPollStats,
+  jaccardSimilarity
+} = require('../src/services/stats.service');
+const {
+  normalizePollScan,
   normalizePolls
-} = require('../src/poll-stats');
+} = require('../src/services/poll.service');
+
+function calculatePollStats(input, options) {
+  return calculateNormalizedPollStats(normalizePollScan(input), options);
+}
 
 const voters = {
   joao: ['111@c.us', 'João'],
