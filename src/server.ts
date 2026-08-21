@@ -1,20 +1,43 @@
-'use strict';
-
-const path = require('path');
-const express = require('express');
-const {
+import path from 'node:path';
+import express, { type ErrorRequestHandler } from 'express';
+import {
   WhatsAppService,
   POLL_SCAN_DEFAULT_LIMIT,
   POLL_SCAN_MAX_LIMIT,
   HISTORY_PREPARE_DEFAULT_LIMIT,
   HISTORY_PREPARE_MAX_LIMIT
-} = require('./whatsapp');
-const { calculatePollStats } = require('./poll-stats');
+} from './whatsapp';
+import { calculatePollStats, type PollScanInput } from './poll-stats';
+
+type ValidationResult<T> =
+  | { value: T; error?: never }
+  | { error: string; value?: never };
+
+interface PollPayload {
+  groupId: string;
+  question: string;
+  options: string[];
+  allowMultipleAnswers: boolean;
+}
+
+interface PollScanPayload {
+  groupId: string;
+  limit: number;
+}
+
+interface HistoryPreparePayload {
+  groupId: string;
+  target: number;
+}
+
+interface CodedError extends Error {
+  code?: string;
+}
 
 const app = express();
 const whatsapp = new WhatsAppService();
 const port = Number(process.env.PORT) || 3000;
-let latestPollScan = null;
+let latestPollScan: PollScanInput | null = null;
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '20kb' }));
@@ -173,8 +196,8 @@ app.use('/api', (_request, response) => {
   response.status(404).json({ error: 'Endpoint não encontrado.' });
 });
 
-app.use((error, _request, response, _next) => {
-  const knownErrors = {
+const apiErrorHandler: ErrorRequestHandler = (error: unknown, _request, response, _next) => {
+  const knownErrors: Record<string, number> = {
     WHATSAPP_NOT_CONNECTED: 503,
     GROUP_NOT_FOUND: 404,
     GROUP_MEMBERS_UNAVAILABLE: 504,
@@ -184,16 +207,18 @@ app.use((error, _request, response, _next) => {
     POLL_MESSAGES_FETCH_FAILED: 502,
     HISTORY_PREPARE_BUSY: 409
   };
-  const status = knownErrors[error.code] || 500;
+  const codedError = toCodedError(error);
+  const status = (codedError.code && knownErrors[codedError.code]) || 500;
 
-  if (status === 500) console.error('[API] Erro inesperado:', error);
+  if (status === 500) console.error('[API] Erro inesperado:', codedError);
   response.status(status).json({
-    error: status === 500 ? 'Erro ao processar a solicitação.' : error.message
+    error: status === 500 ? 'Erro ao processar a solicitação.' : codedError.message
   });
-});
+};
+app.use(apiErrorHandler);
 
-function validatePoll(body) {
-  if (!body || typeof body !== 'object') return { error: 'Corpo da solicitação inválido.' };
+function validatePoll(body: unknown): ValidationResult<PollPayload> {
+  if (!isRecord(body)) return { error: 'Corpo da solicitação inválido.' };
 
   const groupId = typeof body.groupId === 'string' ? body.groupId.trim() : '';
   const question = typeof body.question === 'string' ? body.question.trim() : '';
@@ -220,14 +245,15 @@ function validatePoll(body) {
   };
 }
 
-function validatePollScan(groupIdValue, body) {
+function validatePollScan(groupIdValue: unknown, body: unknown): ValidationResult<PollScanPayload> {
   const groupId = typeof groupIdValue === 'string' ? groupIdValue.trim() : '';
   if (!groupId.endsWith('@g.us')) return { error: 'Selecione um grupo válido.' };
-  if (body !== undefined && (body === null || typeof body !== 'object' || Array.isArray(body))) {
+  if (body !== undefined && !isRecord(body)) {
     return { error: 'Corpo da solicitação inválido.' };
   }
 
-  const rawLimit = body?.limit ?? POLL_SCAN_DEFAULT_LIMIT;
+  const requestBody = isRecord(body) ? body : undefined;
+  const rawLimit = requestBody?.limit ?? POLL_SCAN_DEFAULT_LIMIT;
   const limit = Number(rawLimit);
   if (!Number.isInteger(limit) || limit < 1 || limit > POLL_SCAN_MAX_LIMIT) {
     return { error: `O limite deve ser um número inteiro entre 1 e ${POLL_SCAN_MAX_LIMIT}.` };
@@ -235,20 +261,24 @@ function validatePollScan(groupIdValue, body) {
   return { value: { groupId, limit } };
 }
 
-function validateGroupId(groupIdValue) {
+function validateGroupId(groupIdValue: unknown): ValidationResult<string> {
   const groupId = typeof groupIdValue === 'string' ? groupIdValue.trim() : '';
   return groupId.endsWith('@g.us')
     ? { value: groupId }
     : { error: 'Selecione um grupo válido.' };
 }
 
-function validateHistoryPrepare(groupIdValue, body) {
+function validateHistoryPrepare(
+  groupIdValue: unknown,
+  body: unknown
+): ValidationResult<HistoryPreparePayload> {
   const group = validateGroupId(groupIdValue);
-  if (group.error) return group;
-  if (body !== undefined && (body === null || typeof body !== 'object' || Array.isArray(body))) {
+  if ('error' in group) return { error: group.error };
+  if (body !== undefined && !isRecord(body)) {
     return { error: 'Corpo da solicitação inválido.' };
   }
-  const target = Number(body?.target ?? HISTORY_PREPARE_DEFAULT_LIMIT);
+  const requestBody = isRecord(body) ? body : undefined;
+  const target = Number(requestBody?.target ?? HISTORY_PREPARE_DEFAULT_LIMIT);
   if (!Number.isInteger(target) || target < 1 || target > HISTORY_PREPARE_MAX_LIMIT) {
     return { error: `O alvo deve ser um número inteiro entre 1 e ${HISTORY_PREPARE_MAX_LIMIT}.` };
   }
@@ -261,7 +291,7 @@ const server = app.listen(port, () => {
 });
 
 let shuttingDown = false;
-async function shutdown(signal) {
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`\nRecebido ${signal}. Encerrando...`);
@@ -273,4 +303,12 @@ async function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-module.exports = { app, validatePoll, validatePollScan, validateHistoryPrepare };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function toCodedError(error: unknown): CodedError {
+  return error instanceof Error ? error as CodedError : new Error(String(error));
+}
+
+export { app, validatePoll, validatePollScan, validateHistoryPrepare };

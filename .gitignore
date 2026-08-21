@@ -1,5 +1,6 @@
 # Dependências e relatórios locais
 node_modules/
+dist/
 coverage/
 .nyc_output/
 

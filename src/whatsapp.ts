@@ -1,8 +1,180 @@
-'use strict';
+import path from 'node:path';
+import QRCode from 'qrcode';
+import WhatsAppWeb = require('whatsapp-web.js');
+import type { Chat as ChatInstance, Message } from 'whatsapp-web.js';
 
-const path = require('path');
-const QRCode = require('qrcode');
-const { Chat, Client, LocalAuth, MessageTypes, Poll } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageTypes, Poll } = WhatsAppWeb;
+const ChatConstructor = (WhatsAppWeb as unknown as {
+  Chat: new (client: InstanceType<typeof Client>, data: Record<string, unknown>) => ChatInstance;
+}).Chat;
+
+declare global {
+  interface Window {
+    // Compatibility boundary: these internal WhatsApp Web APIs are dynamic and
+    // are intentionally limited to code executed inside Puppeteer.
+    require(moduleName: string): any;
+    WWebJS: any;
+  }
+}
+
+interface CodedError extends Error {
+  code?: string;
+}
+
+interface GroupSummary {
+  id: string;
+  name: string;
+}
+
+interface GroupMember {
+  id: string;
+  name: string;
+  numberHint: string | null;
+  profilePicUrl: string | null;
+}
+
+interface BrowserMember {
+  id: unknown;
+  name: unknown;
+  numberHint: string | null;
+}
+
+interface BrowserMembersResult {
+  members: BrowserMember[];
+  totalMembers: number;
+  updateTimedOut: boolean;
+}
+
+interface BrowserId {
+  _serialized?: string;
+  server?: string;
+  toString?: () => string;
+}
+
+interface BrowserChat {
+  id?: BrowserId;
+  groupMetadata?: unknown;
+  formattedTitle?: string;
+  name?: string;
+}
+
+interface BrowserParticipant {
+  id?: BrowserId;
+}
+
+interface BrowserPollVote {
+  sender?: string | BrowserId;
+  selectedOptionLocalIds?: Iterable<number>;
+  senderTimestampMs?: unknown;
+}
+
+interface BrowserPollMessage {
+  id?: { id?: unknown; _serialized?: string; toString?: () => string };
+}
+
+interface SerializedPollId {
+  localId: string;
+  serialized: string;
+}
+
+interface SendPollInput {
+  groupId: string;
+  question: string;
+  options: string[];
+  allowMultipleAnswers: boolean;
+}
+
+interface PollOptionLike {
+  name?: unknown;
+  localId?: unknown;
+}
+
+type PollMessage = Omit<Message, 'id' | 'pollOptions'> & {
+  id: { id?: unknown; _serialized?: string; toString?: () => string };
+  pollOptions: Array<string | PollOptionLike>;
+  participant?: unknown;
+};
+
+interface RecoveredVote {
+  voterId: string | null;
+  selectedOptionIds: unknown[];
+  selectedOptions: string[];
+  timestamp: number | null;
+}
+
+interface PollScanVote {
+  voterId: string | null;
+  voterName: string | null;
+  selectedOptionIds: unknown[];
+  selectedOptions: string[];
+  timestamp: number | null;
+}
+
+interface ScannedPoll {
+  messageId: string | null;
+  question: string;
+  timestamp: number | null;
+  creatorId: string | null;
+  creatorName: string | null;
+  options: string[];
+  allowMultipleAnswers: boolean;
+  votes: PollScanVote[];
+  voteCount: number;
+  votesAvailable: boolean;
+  votesError: string | null;
+}
+
+export interface PollScanResult {
+  group: GroupSummary;
+  requestedLimit: number;
+  messagesScanned: number;
+  pollsFound: number;
+  pollsWithVotesAvailable: number;
+  messageTypes: Record<string, number>;
+  polls: ScannedPoll[];
+}
+
+type HistoryPreparationStatus =
+  | 'preparing'
+  | 'completed'
+  | 'stabilized'
+  | 'cancelled'
+  | 'timeout'
+  | 'error';
+
+interface HistoryPreparationJob {
+  token: symbol;
+  groupId: string;
+  status: HistoryPreparationStatus;
+  messagesAvailable: number;
+  initialMessagesAvailable: number;
+  attempts: number;
+  noGrowthAttempts: number;
+  target: number;
+  strategy: string;
+  detail: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  error?: string;
+  cancelRequested: boolean;
+}
+
+interface SerializedHistoryPreparation {
+  status: HistoryPreparationStatus;
+  groupId: string;
+  messagesAvailable: number;
+  initialMessagesAvailable: number;
+  attempts: number;
+  noGrowthAttempts: number;
+  target: number;
+  strategy: string;
+  detail: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  error: string | null;
+}
 
 const POLL_SCAN_DEFAULT_LIMIT = 1000;
 const POLL_SCAN_MAX_LIMIT = 500_000;
@@ -23,6 +195,21 @@ const CONNECTION_STATUS = Object.freeze({
 });
 
 class WhatsAppService {
+  status: typeof CONNECTION_STATUS[keyof typeof CONNECTION_STATUS];
+  qrDataUrl: string | null;
+  lastError: string | null;
+  initialized: boolean;
+  clientGeneration: number;
+  pollScanInProgress: boolean;
+  activeHistoryPreparation: HistoryPreparationJob | null;
+  historyPreparationByGroup: Map<string, HistoryPreparationJob>;
+  historyPrepareTimeoutMs: number;
+  historyPrepareDelayMs: number;
+  historyPrepareStableAttempts: number;
+  initializationRetryCount: number;
+  initializationRetryTimer: ReturnType<typeof setTimeout> | null;
+  client!: InstanceType<typeof Client>;
+
   constructor() {
     this.status = CONNECTION_STATUS.CONNECTING;
     this.qrDataUrl = null;
@@ -40,7 +227,7 @@ class WhatsAppService {
     this.createClient();
   }
 
-  createClient() {
+  createClient(): void {
     const client = new Client({
       authStrategy: new LocalAuth({
         dataPath: path.join(process.cwd(), '.wwebjs_auth')
@@ -57,10 +244,10 @@ class WhatsAppService {
     this.registerEvents(client, this.clientGeneration);
   }
 
-  registerEvents(client, generation) {
+  registerEvents(client: InstanceType<typeof Client>, generation: number): void {
     const isCurrentClient = () => this.client === client && this.clientGeneration === generation;
 
-    client.on('qr', async (qr) => {
+    client.on('qr', async (qr: string) => {
       if (!isCurrentClient()) return;
       this.status = CONNECTION_STATUS.WAITING_QR;
       this.lastError = null;
@@ -76,7 +263,7 @@ class WhatsAppService {
         if (!isCurrentClient()) return;
         this.qrDataUrl = null;
         this.lastError = 'Não foi possível gerar a imagem do QR Code.';
-        console.error('[WhatsApp] Erro ao gerar QR Code:', error.message);
+        console.error('[WhatsApp] Erro ao gerar QR Code:', getErrorMessage(error));
       }
     });
 
@@ -97,7 +284,7 @@ class WhatsAppService {
       console.log('[WhatsApp] Cliente conectado e pronto.');
     });
 
-    client.on('auth_failure', (message) => {
+    client.on('auth_failure', (message: string) => {
       if (!isCurrentClient()) return;
       this.cancelActiveHistoryPreparation('cancelled');
       this.status = CONNECTION_STATUS.AUTH_FAILURE;
@@ -106,7 +293,7 @@ class WhatsAppService {
       console.error('[WhatsApp] Falha de autenticação:', message);
     });
 
-    client.on('disconnected', (reason) => {
+    client.on('disconnected', (reason: string) => {
       if (!isCurrentClient()) return;
       this.cancelActiveHistoryPreparation('cancelled');
       this.status = CONNECTION_STATUS.DISCONNECTED;
@@ -115,7 +302,7 @@ class WhatsAppService {
       console.warn('[WhatsApp] Desconectado:', reason);
     });
 
-    client.on('change_state', (state) => {
+    client.on('change_state', (state: string) => {
       if (!isCurrentClient()) return;
       if (this.status !== CONNECTION_STATUS.CONNECTED) {
         this.status = CONNECTION_STATUS.CONNECTING;
@@ -124,7 +311,7 @@ class WhatsAppService {
     });
   }
 
-  initialize() {
+  initialize(): void {
     if (this.initialized) return;
     this.initialized = true;
     this.status = CONNECTION_STATUS.CONNECTING;
@@ -133,7 +320,10 @@ class WhatsAppService {
     client.initialize().catch((error) => this.handleInitializationError(client, error));
   }
 
-  async handleInitializationError(client, error) {
+  async handleInitializationError(
+    client: InstanceType<typeof Client>,
+    error: unknown
+  ): Promise<void> {
     if (this.client !== client) return;
 
     if (isTransientInitializationError(error)
@@ -148,7 +338,7 @@ class WhatsAppService {
       try {
         await client.destroy();
       } catch (destroyError) {
-        console.warn('[WhatsApp] Não foi possível encerrar completamente a tentativa anterior:', destroyError.message);
+        console.warn('[WhatsApp] Não foi possível encerrar completamente a tentativa anterior:', getErrorMessage(destroyError));
       }
       if (this.client !== client) return;
 
@@ -177,13 +367,13 @@ class WhatsAppService {
     };
   }
 
-  getQrCode() {
+  getQrCode(): string | null {
     return this.qrDataUrl;
   }
 
-  ensureConnected() {
+  ensureConnected(): void {
     if (this.status !== CONNECTION_STATUS.CONNECTED) {
-      const error = new Error('WhatsApp ainda não está conectado.');
+      const error = new Error('WhatsApp ainda não está conectado.') as CodedError;
       error.code = 'WHATSAPP_NOT_CONNECTED';
       throw error;
     }
@@ -203,7 +393,7 @@ class WhatsAppService {
     } catch (cause) {
       this.status = CONNECTION_STATUS.DISCONNECTED;
       this.lastError = 'Não foi possível desconectar a sessão do WhatsApp.';
-      const error = new Error(this.lastError, { cause });
+      const error = new Error(this.lastError, { cause }) as CodedError;
       error.code = 'WHATSAPP_LOGOUT_FAILED';
       throw error;
     }
@@ -214,14 +404,14 @@ class WhatsAppService {
     return this.getStatus();
   }
 
-  async getGroups() {
+  async getGroups(): Promise<GroupSummary[]> {
     this.ensureConnected();
     // getChats() serializa todos os tipos de conversa e pode falhar por causa
     // de um único chat incompatível. O MVP só precisa destes dois campos.
-    const groups = await this.client.pupPage.evaluate(() => {
-      const chats = window.require('WAWebCollections').Chat.getModelsArray();
+    const groups: GroupSummary[] = await this.client.pupPage.evaluate(() => {
+      const chats: BrowserChat[] = window.require('WAWebCollections').Chat.getModelsArray();
 
-      return chats.flatMap((chat) => {
+      return chats.flatMap((chat: BrowserChat): GroupSummary[] => {
         try {
           const id = chat.id?._serialized || chat.id?.toString?.();
           const isGroup = Boolean(chat.groupMetadata)
@@ -243,24 +433,24 @@ class WhatsAppService {
       .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }
 
-  async getGroupMembers(groupId) {
+  async getGroupMembers(groupId: string): Promise<{ members: GroupMember[]; totalMembers: number }> {
     this.ensureConnected();
 
     const groups = await this.getGroups();
     if (!groups.some((group) => group.id === groupId)) {
-      const error = new Error('Grupo não encontrado.');
+      const error = new Error('Grupo não encontrado.') as CodedError;
       error.code = 'GROUP_NOT_FOUND';
       throw error;
     }
 
-    const result = await this.client.pupPage.evaluate(async (groupId) => {
+    const result: BrowserMembersResult = await this.client.pupPage.evaluate(async (groupId) => {
       const WidFactory = window.require('WAWebWidFactory');
       const collections = window.require('WAWebCollections');
       const contactGetters = window.require('WAWebContactGetters');
       const groupWid = WidFactory.createWid(groupId);
       let chat = collections.Chat.get(groupWid)
         || await collections.Chat.find(groupWid);
-      let participants = chat?.groupMetadata?.participants?.serialize?.() || [];
+      let participants: BrowserParticipant[] = chat?.groupMetadata?.participants?.serialize?.() || [];
       let updateTimedOut = false;
 
       if (!participants.length) {
@@ -277,13 +467,16 @@ class WhatsAppService {
         participants = chat?.groupMetadata?.participants?.serialize?.() || [];
       }
 
-      const members = (await Promise.all(participants.map(async (participant, index) => {
+      const members = (await Promise.all(participants.map(async (
+        participant: BrowserParticipant,
+        index: number
+      ): Promise<BrowserMember | null> => {
         try {
           const participantId = participant.id;
           const serializedId = participantId?._serialized || participantId?.toString?.();
           if (!serializedId) return null;
           const contact = collections.Contact.get(serializedId)
-            || await collections.Contact.find(participantId).catch(() => null);
+            || await collections.Contact.find(participantId).catch((): null => null);
           const digits = String(serializedId).split('@')[0].replace(/\D/g, '');
           // whatsapp-web.js 1.34.7 define pushname como o nome público
           // configurado pelo próprio contato. `name` é o nome salvo localmente.
@@ -301,7 +494,7 @@ class WhatsAppService {
         } catch (_error) {
           return null;
         }
-      }))).filter(Boolean);
+      }))).filter((member: BrowserMember | null): member is BrowserMember => member !== null);
 
       return { members, totalMembers: participants.length, updateTimedOut };
     }, groupId);
@@ -309,23 +502,26 @@ class WhatsAppService {
     if (!result.totalMembers) {
       const error = new Error(result.updateTimedOut
         ? 'A busca dos membros demorou demais. Tente novamente em alguns segundos.'
-        : 'Não foi possível carregar os membros deste grupo. Tente atualizar os grupos e repetir.');
+        : 'Não foi possível carregar os membros deste grupo. Tente atualizar os grupos e repetir.') as CodedError;
       error.code = 'GROUP_MEMBERS_UNAVAILABLE';
       throw error;
     }
 
-    const members = result.members.map((member, index) => ({
+    const members: GroupMember[] = result.members.map((member, index) => ({
       id: String(member.id),
       name: String(member.name || `Participante ${index + 1}`).trim().slice(0, 100)
         || `Participante ${index + 1}`,
       numberHint: member.numberHint || null,
-      profilePicUrl: null
+      profilePicUrl: null as string | null
     }));
 
     return { members, totalMembers: result.totalMembers };
   }
 
-  async getGroupMemberProfilePic(groupId, memberId) {
+  async getGroupMemberProfilePic(
+    groupId: string,
+    memberId: string
+  ): Promise<{ profilePicUrl: string | null }> {
     this.ensureConnected();
 
     const isMember = await this.client.pupPage.evaluate(({ groupId, memberId }) => {
@@ -333,9 +529,9 @@ class WhatsAppService {
         const WidFactory = window.require('WAWebWidFactory');
         const collections = window.require('WAWebCollections');
         const chat = collections.Chat.get(WidFactory.createWid(groupId));
-        const participants = chat?.groupMetadata?.participants?.serialize?.() || [];
+        const participants: BrowserParticipant[] = chat?.groupMetadata?.participants?.serialize?.() || [];
 
-        return participants.some((participant) => {
+        return participants.some((participant: BrowserParticipant) => {
           const id = participant.id?._serialized || participant.id?.toString?.();
           return id === memberId;
         });
@@ -345,7 +541,7 @@ class WhatsAppService {
     }, { groupId, memberId });
 
     if (!isMember) {
-      const error = new Error('Membro não encontrado neste grupo.');
+      const error = new Error('Membro não encontrado neste grupo.') as CodedError;
       error.code = 'GROUP_MEMBER_NOT_FOUND';
       throw error;
     }
@@ -353,7 +549,7 @@ class WhatsAppService {
     try {
       const profilePicUrl = await Promise.race([
         this.client.getProfilePicUrl(memberId),
-        new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
       ]);
       return { profilePicUrl: profilePicUrl || null };
     } catch (_error) {
@@ -362,17 +558,21 @@ class WhatsAppService {
     }
   }
 
-  async sendPoll({ groupId, question, options, allowMultipleAnswers }) {
+  async sendPoll({ groupId, question, options, allowMultipleAnswers }: SendPollInput) {
     this.ensureConnected();
 
     const groups = await this.getGroups();
     if (!groups.some((group) => group.id === groupId)) {
-      const error = new Error('Grupo não encontrado.');
+      const error = new Error('Grupo não encontrado.') as CodedError;
       error.code = 'GROUP_NOT_FOUND';
       throw error;
     }
 
-    const poll = new Poll(question, options, { allowMultipleAnswers });
+    const poll = new Poll(
+      question,
+      options,
+      { allowMultipleAnswers } as WhatsAppWeb.PollSendOptions
+    );
     // Algumas versões do WhatsApp Web removem a mensagem da coleção interna
     // antes de whatsapp-web.js montar o objeto de retorno. Nesse caso o envio
     // termina sem exceção, mas `message` vem undefined. waitUntilMsgSent faz a
@@ -384,15 +584,18 @@ class WhatsAppService {
     return { messageId: message?.id?._serialized || null };
   }
 
-  async scanGroupPolls(groupId, limit = POLL_SCAN_DEFAULT_LIMIT) {
+  async scanGroupPolls(
+    groupId: string,
+    limit = POLL_SCAN_DEFAULT_LIMIT
+  ): Promise<PollScanResult> {
     this.ensureConnected();
     if (this.activeHistoryPreparation) {
-      const error = new Error('Aguarde a preparação do histórico terminar antes de analisar as enquetes.');
+      const error = new Error('Aguarde a preparação do histórico terminar antes de analisar as enquetes.') as CodedError;
       error.code = 'HISTORY_PREPARE_BUSY';
       throw error;
     }
     if (this.pollScanInProgress) {
-      const error = new Error('Já existe uma análise de enquetes em andamento. Aguarde a conclusão.');
+      const error = new Error('Já existe uma análise de enquetes em andamento. Aguarde a conclusão.') as CodedError;
       error.code = 'POLL_SCAN_BUSY';
       throw error;
     }
@@ -405,11 +608,11 @@ class WhatsAppService {
     }
   }
 
-  async performGroupPollScan(groupId, limit) {
+  async performGroupPollScan(groupId: string, limit: number): Promise<PollScanResult> {
     const groups = await this.getGroups();
     const group = groups.find((candidate) => candidate.id === groupId);
     if (!group) {
-      const error = new Error('Grupo não encontrado.');
+      const error = new Error('Grupo não encontrado.') as CodedError;
       error.code = 'GROUP_NOT_FOUND';
       throw error;
     }
@@ -419,43 +622,48 @@ class WhatsAppService {
     // Chat. Algumas versões atuais do WhatsApp Web falham nessa serialização
     // com uma exceção minificada (`r: r`). Chat#fetchMessages só precisa do ID
     // e internamente pede o modelo sem serializá-lo (`getAsModel: false`).
-    const chat = new Chat(this.client, {
+    const chat = new ChatConstructor(this.client, {
       id: { _serialized: groupId },
       formattedTitle: group.name,
       isGroup: true
     });
-    let messages;
+    let messages: Message[];
     try {
       messages = await chat.fetchMessages({ limit });
     } catch (cause) {
       console.error('[WhatsApp] fetchMessages failed during poll scan:', cause);
-      const error = new Error('O WhatsApp Web não conseguiu carregar o histórico disponível deste grupo.', { cause });
+      const error = new Error(
+        'O WhatsApp Web não conseguiu carregar o histórico disponível deste grupo.',
+        { cause }
+      ) as CodedError;
       error.code = 'POLL_MESSAGES_FETCH_FAILED';
       throw error;
     }
-    const typeCounts = messages.reduce((counts, message) => {
+    const typeCounts = messages.reduce<Record<string, number>>((counts, message) => {
       const type = String(message.type || 'unknown');
       counts[type] = (counts[type] || 0) + 1;
       return counts;
     }, {});
     console.log('[WhatsApp] Types returned:', typeCounts);
 
-    const pollMessages = messages.filter((message) => message.type === MessageTypes.POLL_CREATION);
+    const pollMessages = messages.filter(
+      (message) => message.type === MessageTypes.POLL_CREATION
+    ) as PollMessage[];
     await this.hydratePollMessageIds(groupId, pollMessages);
     // Reaproveita a resolução de nomes já usada pelo seletor de membros.
-    let members = [];
+    let members: GroupMember[] = [];
     if (pollMessages.length) {
       try {
         ({ members } = await this.getGroupMembers(groupId));
       } catch (error) {
-        console.warn('[WhatsApp] Poll scan could not resolve group member names:', error.message);
+        console.warn('[WhatsApp] Poll scan could not resolve group member names:', getErrorMessage(error));
       }
     }
-    const namesById = new Map(members.map((member) => [member.id, member.name]));
+    const namesById = new Map<string, string>(members.map((member) => [member.id, member.name]));
     const ownId = this.client.info?.wid?._serialized || null;
     if (ownId && this.client.info?.pushname) namesById.set(ownId, this.client.info.pushname);
 
-    const polls = [];
+    const polls: ScannedPoll[] = [];
     let pollsWithVotesAvailable = 0;
     for (const message of pollMessages) {
       const contextualCreatorId = normalizeWhatsAppId(message.participant)
@@ -464,7 +672,7 @@ class WhatsAppService {
         || (message.fromMe ? ownId : null)
         || (contextualCreatorId && !contextualCreatorId.endsWith('@g.us') ? contextualCreatorId : null);
       const messageId = normalizeWhatsAppId(message.id);
-      const poll = {
+      const poll: ScannedPoll = {
         messageId,
         question: cleanText(message.pollName, 500) || 'Enquete sem pergunta disponível',
         timestamp: Number(message.timestamp) || null,
@@ -500,7 +708,7 @@ class WhatsAppService {
         poll.votesAvailable = true;
         pollsWithVotesAvailable += 1;
       } catch (error) {
-        poll.votesError = cleanText(error?.message || error, 300)
+        poll.votesError = cleanText(getErrorMessage(error), 300)
           || 'O WhatsApp Web não disponibilizou os votos desta enquete.';
         console.warn(`[WhatsApp] Could not recover votes for poll ${poll.messageId || '(unknown id)'}: ${poll.votesError}`);
       }
@@ -520,7 +728,7 @@ class WhatsAppService {
     };
   }
 
-  async getGroupHistoryStatus(groupId) {
+  async getGroupHistoryStatus(groupId: string) {
     this.ensureConnected();
     const group = await this.findGroup(groupId);
     const saved = this.historyPreparationByGroup.get(groupId);
@@ -540,32 +748,32 @@ class WhatsAppService {
       initialMessagesAvailable: messagesAvailable,
       attempts: 0,
       noGrowthAttempts: 0,
-      target: null,
-      strategy: null,
+      target: null as null,
+      strategy: null as null,
       detail: 'Histórico disponível nesta sessão.',
       updatedAt: new Date().toISOString(),
       groupName: group.name
     };
   }
 
-  async startGroupHistoryPreparation(groupId, target = HISTORY_PREPARE_DEFAULT_LIMIT) {
+  async startGroupHistoryPreparation(groupId: string, target = HISTORY_PREPARE_DEFAULT_LIMIT) {
     this.ensureConnected();
     await this.findGroup(groupId);
 
     if (this.pollScanInProgress) {
-      const error = new Error('Aguarde a análise de enquetes terminar antes de preparar o histórico.');
+      const error = new Error('Aguarde a análise de enquetes terminar antes de preparar o histórico.') as CodedError;
       error.code = 'POLL_SCAN_BUSY';
       throw error;
     }
     if (this.activeHistoryPreparation?.groupId === groupId) {
-      const error = new Error('O histórico deste grupo já está sendo preparado.');
+      const error = new Error('O histórico deste grupo já está sendo preparado.') as CodedError;
       error.code = 'HISTORY_PREPARE_BUSY';
       throw error;
     }
     if (this.activeHistoryPreparation) this.cancelActiveHistoryPreparation('cancelled');
 
     const initialMessagesAvailable = await this.countAvailableGroupMessages(groupId);
-    const job = {
+    const job: HistoryPreparationJob = {
       token: Symbol('history-preparation'),
       groupId,
       status: 'preparing',
@@ -586,12 +794,12 @@ class WhatsAppService {
     console.log(`[HistorySync] Initial available messages: ${initialMessagesAvailable}`);
     console.log(`[HistorySync] Strategy: ${job.strategy}`);
     this.runGroupHistoryPreparation(job).catch((error) => {
-      console.error(`[HistorySync] Unexpected runner failure group=${groupId}:`, error.message);
+      console.error(`[HistorySync] Unexpected runner failure group=${groupId}:`, getErrorMessage(error));
     });
     return this.serializeHistoryPreparation(job);
   }
 
-  async runGroupHistoryPreparation(job) {
+  async runGroupHistoryPreparation(job: HistoryPreparationJob): Promise<void> {
     const deadline = Date.now() + this.historyPrepareTimeoutMs;
     try {
       if (job.messagesAvailable >= job.target) {
@@ -641,13 +849,13 @@ class WhatsAppService {
         this.finishHistoryPreparation(job, 'cancelled', 'Preparação cancelada.');
         return;
       }
-      console.error(`[HistorySync] Failed group=${job.groupId}:`, cause.message);
+      console.error(`[HistorySync] Failed group=${job.groupId}:`, getErrorMessage(cause));
       job.error = 'O WhatsApp Web não conseguiu carregar mensagens anteriores deste grupo.';
       this.finishHistoryPreparation(job, 'error', job.error);
     }
   }
 
-  async loadEarlierGroupMessages(groupId) {
+  async loadEarlierGroupMessages(groupId: string): Promise<{ loadedMessages: number }> {
     return this.client.pupPage.evaluate(async (chatId) => {
       const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
       const loader = window.require('WAWebChatLoadMessages');
@@ -659,25 +867,27 @@ class WhatsAppService {
     }, groupId);
   }
 
-  async countAvailableGroupMessages(groupId) {
+  async countAvailableGroupMessages(groupId: string): Promise<number> {
     return this.client.pupPage.evaluate(async (chatId) => {
       const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
-      return chat.msgs.getModelsArray().filter((message) => !message.isNotification).length;
+      return chat.msgs.getModelsArray().filter(
+        (message: { isNotification?: boolean }) => !message.isNotification
+      ).length;
     }, groupId);
   }
 
-  async findGroup(groupId) {
+  async findGroup(groupId: string): Promise<GroupSummary> {
     const groups = await this.getGroups();
     const group = groups.find((candidate) => candidate.id === groupId);
     if (!group) {
-      const error = new Error('Grupo não encontrado.');
+      const error = new Error('Grupo não encontrado.') as CodedError;
       error.code = 'GROUP_NOT_FOUND';
       throw error;
     }
     return group;
   }
 
-  cancelGroupHistoryPreparation(groupId) {
+  cancelGroupHistoryPreparation(groupId: string) {
     this.ensureConnected();
     const job = this.activeHistoryPreparation;
     if (job?.groupId === groupId) {
@@ -690,19 +900,23 @@ class WhatsAppService {
     return this.serializeHistoryPreparation(this.historyPreparationByGroup.get(groupId)) || {
       status: 'idle',
       groupId,
-      messagesAvailable: null,
+      messagesAvailable: null as null,
       detail: 'Nenhuma preparação ativa para este grupo.'
     };
   }
 
-  cancelActiveHistoryPreparation(status = 'cancelled') {
+  cancelActiveHistoryPreparation(status: HistoryPreparationStatus = 'cancelled'): void {
     const job = this.activeHistoryPreparation;
     if (!job) return;
     job.cancelRequested = true;
     this.finishHistoryPreparation(job, status, 'Preparação cancelada.');
   }
 
-  finishHistoryPreparation(job, status, detail) {
+  finishHistoryPreparation(
+    job: HistoryPreparationJob,
+    status: HistoryPreparationStatus,
+    detail: string
+  ): void {
     if (job.status !== 'preparing') return;
     job.status = status;
     job.detail = detail;
@@ -713,7 +927,9 @@ class WhatsAppService {
     console.log(`[HistorySync] History ${label} at ${job.messagesAvailable} messages (group=${job.groupId})`);
   }
 
-  serializeHistoryPreparation(job) {
+  serializeHistoryPreparation(
+    job: HistoryPreparationJob | undefined | null
+  ): SerializedHistoryPreparation | null {
     if (!job) return null;
     return {
       status: job.status,
@@ -732,19 +948,26 @@ class WhatsAppService {
     };
   }
 
-  async getPollVotesForScan(messageId, pollOptions) {
+  async getPollVotesForScan(
+    messageId: string,
+    pollOptions: Array<string | PollOptionLike>
+  ): Promise<RecoveredVote[]> {
     // Client#getPollVotes() busca a mensagem novamente e envia o objeto Message
     // inteiro ao Puppeteer. No WhatsApp Web atual, `id._serialized` se perde
     // nessa segunda serialização. Esta consulta replica a implementação 1.34.7,
     // mas entrega diretamente a string do ID ao WAWebMsgKey.
-    const rawVotes = await this.client.pupPage.evaluate(async (serializedMessageId) => {
+    const rawVotes: Array<{
+      voterId: string | null;
+      selectedOptionIds: number[];
+      timestamp: number | null;
+    }> = await this.client.pupPage.evaluate(async (serializedMessageId) => {
       const messageKey = window.require('WAWebMsgKey').fromString(serializedMessageId);
       const votes = await window
         .require('WAWebPollsVotesSchema')
         .getTable()
         .equals(['parentMsgKey'], messageKey.toString());
 
-      return votes.map((vote) => {
+      return votes.map((vote: BrowserPollVote) => {
         const sender = vote.sender;
         const voterId = typeof sender === 'string'
           ? sender
@@ -757,9 +980,12 @@ class WhatsAppService {
       });
     }, messageId);
 
-    const optionNamesById = new Map((Array.isArray(pollOptions) ? pollOptions : [])
-      .filter((option) => option && typeof option === 'object' && option.localId !== undefined)
-      .map((option) => [String(option.localId), cleanText(option.name, 200)]));
+    const optionNamesById = new Map<string, string | null>();
+    pollOptions.forEach((option) => {
+      if (typeof option !== 'string' && option.localId !== undefined) {
+        optionNamesById.set(String(option.localId), cleanText(option.name, 200));
+      }
+    });
 
     return rawVotes.map((vote) => ({
       voterId: vote.voterId,
@@ -771,32 +997,36 @@ class WhatsAppService {
     }));
   }
 
-  async hydratePollMessageIds(groupId, pollMessages) {
+  async hydratePollMessageIds(groupId: string, pollMessages: PollMessage[]): Promise<void> {
     const messagesWithoutSerializedId = pollMessages.filter((message) => (
       !normalizeWhatsAppId(message.id) && message.id?.id !== undefined
     ));
     if (!messagesWithoutSerializedId.length) return;
 
     const localIds = [...new Set(messagesWithoutSerializedId.map((message) => String(message.id.id)))];
-    let serializedIds = [];
+    let serializedIds: SerializedPollId[] = [];
     try {
       serializedIds = await this.client.pupPage.evaluate(async ({ groupId, localIds }) => {
         const chat = await window.WWebJS.getChat(groupId, { getAsModel: false });
         if (!chat) return [];
         const wantedIds = new Set(localIds);
-        return chat.msgs.getModelsArray().flatMap((message) => {
+        return chat.msgs.getModelsArray().flatMap(
+          (message: BrowserPollMessage): SerializedPollId[] => {
           const localId = message.id?.id;
           if (localId === undefined || !wantedIds.has(String(localId))) return [];
           const serialized = message.id?._serialized || message.id?.toString?.();
           return serialized ? [{ localId: String(localId), serialized: String(serialized) }] : [];
-        });
+          }
+        );
       }, { groupId, localIds });
     } catch (error) {
-      console.warn('[WhatsApp] Could not recover serialized poll message IDs:', error.message);
+      console.warn('[WhatsApp] Could not recover serialized poll message IDs:', getErrorMessage(error));
       return;
     }
 
-    const serializedByLocalId = new Map(serializedIds.map(({ localId, serialized }) => [localId, serialized]));
+    const serializedByLocalId = new Map<string, string>(
+      serializedIds.map(({ localId, serialized }) => [localId, serialized])
+    );
     let recovered = 0;
     messagesWithoutSerializedId.forEach((message) => {
       const serialized = serializedByLocalId.get(String(message.id.id));
@@ -807,7 +1037,7 @@ class WhatsAppService {
     console.log(`[WhatsApp] Recovered IDs for ${recovered}/${messagesWithoutSerializedId.length} poll messages`);
   }
 
-  async shutdown() {
+  async shutdown(): Promise<void> {
     this.cancelActiveHistoryPreparation('cancelled');
     if (this.initializationRetryTimer) {
       clearTimeout(this.initializationRetryTimer);
@@ -817,56 +1047,67 @@ class WhatsAppService {
     try {
       await this.client.destroy();
     } catch (error) {
-      console.error('[WhatsApp] Erro ao encerrar cliente:', error.message);
+      console.error('[WhatsApp] Erro ao encerrar cliente:', getErrorMessage(error));
     }
   }
 }
 
-function normalizeWhatsAppId(value) {
+function normalizeWhatsAppId(value: unknown): string | null {
   if (typeof value === 'string') return value;
-  if (typeof value?._serialized === 'string') return value._serialized;
-  const stringified = value?.toString?.();
+  if (!isRecord(value)) return null;
+  if (typeof value._serialized === 'string') return value._serialized;
+  const stringified = typeof value.toString === 'function' ? value.toString() : undefined;
   return typeof stringified === 'string' && stringified !== '[object Object]'
     ? stringified
     : null;
 }
 
-function delay(milliseconds) {
+function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function isTransientInitializationError(error) {
-  const message = String(error?.message || error || '').toLocaleLowerCase('en-US');
+function isTransientInitializationError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLocaleLowerCase('en-US');
   return message.includes('execution context was destroyed')
     || message.includes('cannot find context with specified id')
     || message.includes('most likely because of a navigation');
 }
 
-function cleanText(value, maxLength) {
+function cleanText(value: unknown, maxLength: number): string | null {
   if (value === null || value === undefined) return null;
   return String(value).trim().slice(0, maxLength) || null;
 }
 
-function normalizePollOptions(options) {
+function normalizePollOptions(options: unknown): string[] {
   if (!Array.isArray(options)) return [];
   return options.map((option) => cleanText(
-    typeof option === 'string' ? option : option?.name,
+    typeof option === 'string' ? option : isRecord(option) ? option.name : undefined,
     200
   )).filter(Boolean);
 }
 
-function resolveKnownName(id, namesById) {
+function resolveKnownName(id: string | null, namesById: Map<string, string>): string | null {
   if (!id) return null;
   return namesById.get(id) || null;
 }
 
-function normalizeVoteTimestamp(value) {
+function normalizeVoteTimestamp(value: unknown): number | null {
   const timestamp = Number(value);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
   return timestamp > 10_000_000_000 ? Math.floor(timestamp / 1000) : Math.floor(timestamp);
 }
 
-module.exports = {
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (isRecord(error) && typeof error.message === 'string') return error.message;
+  return error === null || error === undefined ? '' : String(error);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export {
   WhatsAppService,
   CONNECTION_STATUS,
   POLL_SCAN_DEFAULT_LIMIT,

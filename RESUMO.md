@@ -122,8 +122,8 @@ Exemplo do corpo da análise experimental:
 
 ## Estrutura principal
 
-- `src/server.js` — servidor Express, endpoints e validações.
-- `src/whatsapp.js` — conexão, grupos, membros, envio e análise experimental de enquetes.
+- `src/server.ts` — servidor Express, endpoints e validações.
+- `src/whatsapp.ts` — conexão, grupos, membros, envio e análise experimental de enquetes.
 - `public/index.html` — estrutura da interface.
 - `public/styles.css` — estilos responsivos.
 - `public/app.js` — interação da interface com a API.

@@ -16,7 +16,9 @@ npm install
 npm run dev
 ```
 
-Abra [http://localhost:3000](http://localhost:3000). Para executar sem reinicialização automática, use `npm start`.
+Abra [http://localhost:3000](http://localhost:3000). Para verificar e compilar o
+backend TypeScript, use `npm run typecheck` e `npm run build`. Depois do build,
+`npm start` executa a saída compilada sem reinicialização automática.
 
 ## Como conectar
 

@@ -1,44 +1,168 @@
-'use strict';
-
 const MIN_BEHAVIOR_SAMPLE = 3;
 const MIN_EXTENDED_SAMPLE = 5;
 const MIN_PAIR_SAMPLE = 5;
 const MIN_BEHAVIOR_PARTICIPATION_RATE = 20;
 const STATS_TIMEZONE = 'America/Sao_Paulo';
-const DAY_NAMES = Object.freeze([
+const DAY_NAMES: ReadonlyArray<readonly [string, string]> = Object.freeze([
   ['segunda-feira', 'Seg'], ['terça-feira', 'Ter'], ['quarta-feira', 'Qua'],
   ['quinta-feira', 'Qui'], ['sexta-feira', 'Sex'], ['sábado', 'Sáb'], ['domingo', 'Dom']
 ]);
 
-function cleanString(value) {
+interface SerializedIdLike {
+  _serialized?: unknown;
+}
+
+interface RawVote {
+  voterId?: unknown;
+  voterName?: unknown;
+  name?: unknown;
+  selectedOptions?: unknown;
+  voteTimestamp?: unknown;
+  timestamp?: unknown;
+}
+
+interface RawPoll {
+  messageId?: unknown;
+  question?: unknown;
+  timestamp?: unknown;
+  options?: unknown;
+  votesAvailable?: unknown;
+  votes?: RawVote[];
+  creatorId?: unknown;
+  creatorName?: unknown;
+  authorId?: unknown;
+  authorName?: unknown;
+  author?: unknown;
+  participant?: unknown;
+  participantName?: unknown;
+  from?: unknown;
+  fromName?: unknown;
+}
+
+export interface PollScanInput {
+  group?: { id?: unknown; name?: unknown };
+  pollsFound?: number;
+  polls?: RawPoll[];
+}
+
+interface OrderedParticipant {
+  userId: string;
+  name: string;
+  selectedOptions: string[];
+  voteTimestamp: number | null;
+  order: number;
+}
+
+interface PollParticipant extends Omit<OrderedParticipant, 'order'> {}
+
+interface NormalizedPoll {
+  id: string;
+  question: string;
+  timestamp: number | null;
+  options: string[];
+  votesAvailable: boolean;
+  participants: PollParticipant[];
+  votes: Array<{
+    voterId: string;
+    voterName: string;
+    selectedOptions: string[];
+    timestamp: number | null;
+  }>;
+  creatorId: string | null;
+  creatorName: string | null;
+}
+
+interface MemberIdentity {
+  id: string;
+  name: string;
+}
+
+interface MemberAccumulator extends MemberIdentity {
+  pollsParticipated: number;
+  alignedPolls: number;
+  contrarianPolls: number;
+  lastPlacePolls: number;
+  lastPlaceEligiblePolls: number;
+  voteDelays: number[];
+}
+
+interface ParticipationMember extends Omit<MemberAccumulator, 'voteDelays'> {
+  participationRate: number;
+  alignedRate: number;
+  contrarianRate: number;
+  behaviorPolls: number;
+  unpredictability: number;
+  lastPlaceRate: number;
+  validTimingSamples: number;
+  averageVoteDelaySeconds: number | null;
+}
+
+interface OptionResult {
+  name: string;
+  voteCount: number;
+}
+
+interface PollResult {
+  id: string;
+  question: string;
+  timestamp: number | null;
+  optionCount: number;
+  participantCount: number;
+  optionResults: OptionResult[];
+}
+
+interface StatsOptions {
+  minimumSample?: unknown;
+  minimumExtendedSample?: unknown;
+  minimumPairSample?: unknown;
+  minimumBehaviorParticipationRate?: unknown;
+}
+
+interface PairOptions {
+  minimumPairSample?: unknown;
+  minimumParticipationRate?: unknown;
+}
+
+interface PairAccumulator {
+  memberA: MemberIdentity;
+  memberB: MemberIdentity;
+  totalSimilarity: number;
+  pollsTogether: number;
+}
+
+interface NamedPair {
+  members: MemberIdentity[];
+}
+
+function cleanString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function validTimestamp(value) {
+function validTimestamp(value: unknown): number | null {
   const timestamp = Number(value);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
   const seconds = timestamp > 10_000_000_000 ? Math.floor(timestamp / 1000) : Math.floor(timestamp);
   return Number.isFinite(new Date(seconds * 1000).getTime()) ? seconds : null;
 }
 
-function maskWhatsAppId(value) {
+function maskWhatsAppId(value: unknown): string {
   const id = cleanString(value);
   if (!id) return 'Participante não identificado';
   const number = id.split('@')[0];
   return `••••${number.length <= 4 ? number : number.slice(-4)}`;
 }
 
-function displayName(name, id) {
+function displayName(name: unknown, id: unknown): string {
   return cleanString(name) || maskWhatsAppId(id);
 }
 
-function normalizeWhatsAppId(value) {
+function normalizeWhatsAppId(value: unknown): string {
   if (typeof value === 'string') return cleanString(value);
-  if (typeof value?._serialized === 'string') return cleanString(value._serialized);
+  if (isRecord(value) && typeof value._serialized === 'string') return cleanString(value._serialized);
   return '';
 }
 
-function normalizeCreator(poll) {
+function normalizeCreator(poll: RawPoll): Pick<NormalizedPoll, 'creatorId' | 'creatorName'> {
   const explicitId = normalizeWhatsAppId(poll?.creatorId)
     || normalizeWhatsAppId(poll?.authorId)
     || normalizeWhatsAppId(poll?.author);
@@ -55,9 +179,9 @@ function normalizeCreator(poll) {
   };
 }
 
-function normalizePolls(scan) {
+function normalizePolls(scan: PollScanInput): NormalizedPoll[] {
   const sourcePolls = Array.isArray(scan?.polls) ? scan.polls : [];
-  const seenMessageIds = new Set();
+  const seenMessageIds = new Set<string>();
 
   return sourcePolls.flatMap((poll, pollIndex) => {
     const messageId = cleanString(poll?.messageId);
@@ -66,7 +190,7 @@ function normalizePolls(scan) {
     const options = [...new Set((Array.isArray(poll?.options) ? poll.options : [])
       .map(cleanString).filter(Boolean))];
     const validOptions = new Set(options);
-    const votesByMember = new Map();
+    const votesByMember = new Map<string, OrderedParticipant>();
 
     if (poll?.votesAvailable && Array.isArray(poll.votes)) {
       poll.votes.forEach((vote, voteIndex) => {
@@ -108,7 +232,7 @@ function normalizePolls(scan) {
   });
 }
 
-function isLaterVote(candidate, previous) {
+function isLaterVote(candidate: OrderedParticipant, previous: OrderedParticipant): boolean {
   if (candidate.voteTimestamp !== null && previous.voteTimestamp !== null) {
     return candidate.voteTimestamp >= previous.voteTimestamp;
   }
@@ -117,7 +241,7 @@ function isLaterVote(candidate, previous) {
   return candidate.order >= previous.order;
 }
 
-function getPollOutcome(poll) {
+function getPollOutcome(poll: NormalizedPoll) {
   const optionCounts = new Map((poll?.options || []).map((option) => [option, 0]));
   (poll?.participants || poll?.votes || []).forEach((participant) => {
     participant.selectedOptions.forEach((option) => {
@@ -144,7 +268,7 @@ function getPollOutcome(poll) {
   };
 }
 
-function calculatePollStats(scan, options = {}) {
+function calculatePollStats(scan: PollScanInput, options: StatsOptions = {}) {
   const minimumSample = positiveInteger(options.minimumSample) || MIN_BEHAVIOR_SAMPLE;
   const minimumExtendedSample = positiveInteger(options.minimumExtendedSample)
     || positiveInteger(options.minimumSample) || MIN_EXTENDED_SAMPLE;
@@ -154,10 +278,10 @@ function calculatePollStats(scan, options = {}) {
     ?? MIN_BEHAVIOR_PARTICIPATION_RATE;
   const polls = normalizePolls(scan);
   const eligiblePolls = polls.filter((poll) => poll.votesAvailable);
-  const members = new Map();
-  const pollResults = [];
-  const firstCounts = new Map();
-  const lastCounts = new Map();
+  const members = new Map<string, MemberAccumulator>();
+  const pollResults: PollResult[] = [];
+  const firstCounts = new Map<string, number>();
+  const lastCounts = new Map<string, number>();
   const dayCounts = new Map(DAY_NAMES.map(([name]) => [name, 0]));
   const hourCounts = new Map(Array.from({ length: 24 }, (_, hour) => [hour, 0]));
   let totalParticipations = 0;
@@ -353,8 +477,8 @@ function calculatePollStats(scan, options = {}) {
   };
 }
 
-function calculateCreatorStats(polls) {
-  const creators = new Map();
+function calculateCreatorStats(polls: NormalizedPoll[]) {
+  const creators = new Map<string, { id: string; name: string; pollsCreated: number }>();
   let pollsWithIdentifiedCreator = 0;
   polls.forEach((poll) => {
     if (!poll.creatorId) return;
@@ -381,7 +505,11 @@ function calculateCreatorStats(polls) {
   };
 }
 
-function timingLeader(counts, members, eligiblePollCount) {
+function timingLeader(
+  counts: Map<string, number>,
+  members: Map<string, MemberAccumulator>,
+  eligiblePollCount: number
+) {
   if (!counts.size || !eligiblePollCount) return null;
   const ranking = [...counts].map(([id, count]) => ({
     id,
@@ -393,13 +521,20 @@ function timingLeader(counts, members, eligiblePollCount) {
   return { ...ranking[0], leaders, eligiblePolls: eligiblePollCount, ranking };
 }
 
-function getParticipationEligibleMembers(members, minimumParticipationRate, { inclusive = false } = {}) {
+function getParticipationEligibleMembers<T extends { participationRate: number }>(
+  members: T[],
+  minimumParticipationRate: number,
+  { inclusive = false }: { inclusive?: boolean } = {}
+): T[] {
   return members.filter((member) => inclusive
     ? member.participationRate >= minimumParticipationRate
     : member.participationRate > minimumParticipationRate);
 }
 
-function jaccardSimilarity(leftOptions, rightOptions) {
+function jaccardSimilarity(
+  leftOptions: Iterable<string> | null | undefined,
+  rightOptions: Iterable<string> | null | undefined
+): number {
   const left = leftOptions instanceof Set ? leftOptions : new Set(leftOptions || []);
   const right = rightOptions instanceof Set ? rightOptions : new Set(rightOptions || []);
   const union = new Set([...left, ...right]);
@@ -411,7 +546,11 @@ function jaccardSimilarity(leftOptions, rightOptions) {
   return intersectionSize / union.size;
 }
 
-function calculatePairAffinity(polls, participationRanking, options = {}) {
+function calculatePairAffinity(
+  polls: NormalizedPoll[],
+  participationRanking: ParticipationMember[],
+  options: PairOptions = {}
+) {
   const minimumPairSample = positiveInteger(options.minimumPairSample) || MIN_PAIR_SAMPLE;
   const minimumParticipationRate = validPercentage(options.minimumParticipationRate)
     ?? MIN_BEHAVIOR_PARTICIPATION_RATE;
@@ -420,7 +559,7 @@ function calculatePairAffinity(polls, participationRanking, options = {}) {
     minimumParticipationRate
   );
   const eligibleById = new Map(eligibleMembers.map((member) => [member.id, member]));
-  const pairCounts = new Map();
+  const pairCounts = new Map<string, PairAccumulator>();
 
   polls.forEach((poll) => {
     const participants = poll.participants.filter((participant) => eligibleById.has(participant.userId));
@@ -429,8 +568,8 @@ function calculatePairAffinity(polls, participationRanking, options = {}) {
         const orderedIds = [participants[left].userId, participants[right].userId].sort();
         const key = `${orderedIds[0]}\u0000${orderedIds[1]}`;
         const pair = pairCounts.get(key) || {
-          memberA: memberIdentity(eligibleById.get(orderedIds[0])),
-          memberB: memberIdentity(eligibleById.get(orderedIds[1])),
+          memberA: memberIdentity(eligibleById.get(orderedIds[0])!),
+          memberB: memberIdentity(eligibleById.get(orderedIds[1])!),
           totalSimilarity: 0,
           pollsTogether: 0
         };
@@ -481,11 +620,11 @@ function calculatePairAffinity(polls, participationRanking, options = {}) {
   };
 }
 
-function memberIdentity(member) {
+function memberIdentity(member: ParticipationMember): MemberIdentity {
   return { id: member.id, name: member.name };
 }
 
-function localDateParts(timestamp) {
+function localDateParts(timestamp: number): { weekday: string; hour: number } | null {
   try {
     const parts = new Intl.DateTimeFormat('pt-BR', {
       timeZone: STATS_TIMEZONE,
@@ -503,45 +642,50 @@ function localDateParts(timestamp) {
   }
 }
 
-function binaryEntropy(probability) {
+function binaryEntropy(probability: number): number {
   if (probability <= 0 || probability >= 1) return 0;
   return -(probability * Math.log2(probability)
     + (1 - probability) * Math.log2(1 - probability));
 }
 
-function increment(map, key) {
+function increment<K>(map: Map<K, number>, key: K): void {
   map.set(key, (map.get(key) || 0) + 1);
 }
 
-function positiveInteger(value) {
-  return Number.isInteger(value) && value > 0 ? value : null;
+function positiveInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
 }
 
-function validPercentage(value) {
+function validPercentage(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
     ? value
     : null;
 }
 
-function percentage(value, total) {
-  return total > 0 ? (value / total) * 100 : 0;
+function percentage(value: number | undefined, total: number): number {
+  const numericValue = value ?? 0;
+  return total > 0 ? (numericValue / total) * 100 : 0;
 }
 
-function isMaskedName(name) {
+function isMaskedName(name: string | null): boolean {
   return !name || name.startsWith('••••');
 }
 
-function compareNames(a, b) {
+function compareNames(a: MemberIdentity, b: MemberIdentity): number {
   return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }) || a.id.localeCompare(b.id);
 }
 
-function comparePairNames(a, b) {
-  const label = (pair) => [...pair.members].sort(compareNames)
+function comparePairNames(a: NamedPair, b: NamedPair): number {
+  const label = (pair: NamedPair) => [...pair.members].sort(compareNames)
     .map((member) => `${member.name}\u0000${member.id}`).join('\u0000');
   return label(a).localeCompare(label(b), 'pt-BR', { sensitivity: 'base' });
 }
 
-module.exports = {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export {
   calculatePollStats,
   calculatePairAffinity,
   getParticipationEligibleMembers,
