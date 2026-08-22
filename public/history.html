@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Histórico local e persistente das enquetes do EasyPoll.">
+    <title>Histórico — EasyPoll</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/history.css">
+    <script src="/history.js" defer></script>
+  </head>
+  <body>
+    <main class="history-page-shell">
+      <header class="stats-hero history-page-hero">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-4.5 3v-3H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
+        </div>
+        <div>
+          <p class="eyebrow">Dados persistidos no SQLite</p>
+          <h1>Histórico</h1>
+          <p>Navegue pelas enquetes armazenadas sem reler conversas do WhatsApp.</p>
+        </div>
+      </header>
+
+      <nav class="app-nav" aria-label="Navegação principal">
+        <a href="/">Criar enquete</a>
+        <a class="active" href="/history" aria-current="page">Histórico</a>
+        <a href="/stats">Estatísticas</a>
+      </nav>
+
+      <section class="card history-overview" aria-labelledby="history-group-title">
+        <div class="history-group-picker">
+          <div>
+            <p class="step">Dados locais</p>
+            <h2 id="history-group-title">Grupo armazenado</h2>
+          </div>
+          <label class="sr-only" for="history-group-select">Selecionar grupo armazenado</label>
+          <select id="history-group-select">
+            <option value="">Carregando grupos locais...</option>
+          </select>
+        </div>
+
+        <div id="history-summary" class="history-page-summary" hidden>
+          <div>
+            <strong id="history-stored-count">—</strong>
+            <span>enquetes armazenadas</span>
+          </div>
+          <div>
+            <strong id="history-last-sync">—</strong>
+            <span>última sincronização</span>
+          </div>
+          <div>
+            <strong id="history-oldest">—</strong>
+            <span>histórico local desde</span>
+          </div>
+        </div>
+
+        <p id="history-sync-feedback" class="history-page-feedback" role="status" aria-live="polite">
+          Selecione um grupo para abrir o histórico local.
+        </p>
+        <div class="history-page-sync-actions">
+          <button id="history-sync-newer" class="button secondary" type="button" disabled>
+            <span class="button-label">Sincronizar novidades</span>
+            <span class="spinner dark" hidden></span>
+          </button>
+          <button id="history-sync-older" class="button secondary" type="button" disabled>
+            <span class="button-label">Buscar histórico mais antigo</span>
+            <span class="spinner dark" hidden></span>
+          </button>
+          <button id="history-cancel-sync" class="button history-cancel-button" type="button" hidden>Cancelar</button>
+        </div>
+      </section>
+
+      <section id="history-browser" class="card history-browser" aria-labelledby="history-list-title" hidden>
+        <div class="history-browser-heading">
+          <div>
+            <p class="step">Enquetes persistidas</p>
+            <h2 id="history-list-title">Histórico do grupo</h2>
+          </div>
+          <label class="history-page-size">
+            <span>Por página</span>
+            <select id="history-page-size">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="history-filters">
+          <label class="history-search-field">
+            <span>Buscar pela pergunta</span>
+            <input id="history-search" type="search" placeholder="Ex.: jogo" autocomplete="off">
+          </label>
+          <label>
+            <span>De</span>
+            <input id="history-from" type="date">
+          </label>
+          <label>
+            <span>Até</span>
+            <input id="history-to" type="date">
+          </label>
+          <button id="history-clear-filters" class="button ghost history-clear-filters" type="button" hidden>Limpar filtros</button>
+        </div>
+
+        <div id="history-list-status" class="history-list-status" role="status" aria-live="polite">
+          Carregando histórico...
+        </div>
+        <div id="history-list" class="history-page-list" hidden></div>
+
+        <nav id="history-pagination" class="history-pagination" aria-label="Paginação do histórico" hidden>
+          <button id="history-previous" class="button secondary" type="button">← Anterior</button>
+          <span id="history-page-label">Página 1</span>
+          <button id="history-next" class="button secondary" type="button">Próxima →</button>
+        </nav>
+      </section>
+
+      <dialog id="history-detail-dialog" class="app-dialog history-detail-dialog" aria-labelledby="history-detail-title">
+        <div class="history-detail-shell">
+          <div class="dialog-header">
+            <div>
+              <p class="step">Detalhes da enquete</p>
+              <h2 id="history-detail-title">Carregando...</h2>
+            </div>
+            <button id="history-detail-close" class="dialog-close" type="button" aria-label="Fechar">×</button>
+          </div>
+          <div id="history-detail-content" class="history-detail-content" aria-live="polite"></div>
+        </div>
+      </dialog>
+
+      <div id="history-toast" class="toast" role="status" aria-live="polite" hidden></div>
+      <footer>O histórico consulta somente dados de enquetes armazenados localmente.</footer>
+    </main>
+  </body>
+</html>

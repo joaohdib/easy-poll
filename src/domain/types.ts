@@ -105,6 +105,64 @@ export interface LocalGroup extends Group {
   lastSyncAt: number | null;
 }
 
+export interface PollHistoryCreator {
+  id: string;
+  displayName: string;
+}
+
+export interface PollHistoryItem {
+  messageId: string;
+  question: string;
+  createdAt: number;
+  creator: PollHistoryCreator | null;
+  allowMultipleAnswers: boolean;
+  optionCount: number;
+  votesSnapshotAvailable: boolean;
+  participantCount: number | null;
+  selectionCount: number | null;
+}
+
+export interface PollHistoryPagination {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+export interface PollHistoryListResult {
+  items: PollHistoryItem[];
+  pagination: PollHistoryPagination;
+}
+
+export interface PollHistoryOption {
+  id: number;
+  text: string;
+  position: number;
+  selectionCount: number | null;
+}
+
+export interface PollHistoryParticipant {
+  id: string;
+  displayName: string;
+  votedAt: number | null;
+  selectedOptions: Array<Pick<PollHistoryOption, 'id' | 'text' | 'position'>>;
+}
+
+export interface PollHistoryDetail {
+  messageId: string;
+  groupId: string;
+  question: string;
+  createdAt: number;
+  allowMultipleAnswers: boolean;
+  creator: PollHistoryCreator | null;
+  votesSnapshotAvailable: boolean;
+  votesSnapshotAt: number | null;
+  participantCount: number | null;
+  selectionCount: number | null;
+  options: PollHistoryOption[];
+  participants: PollHistoryParticipant[] | null;
+}
+
 export type IncrementalSyncDirection = 'newer' | 'older';
 
 export interface IncrementalSyncResult {
