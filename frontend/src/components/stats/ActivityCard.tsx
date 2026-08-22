@@ -1,11 +1,12 @@
 import type { DayActivity, HourActivity } from '../../types/api';
 import { numberFormatter } from '../../utils/format';
+import type { ReactNode } from 'react';
 
 type DistributionItem = DayActivity | HourActivity;
 
 interface ActivityCardProps {
   description: string;
-  icon: string;
+  icon: ReactNode;
   items?: DistributionItem[];
   name?: string;
   title: string;

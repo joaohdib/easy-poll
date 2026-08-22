@@ -1,10 +1,11 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import type { PairAffinity } from '../../types/api';
 import { formatPercent, plural } from '../../utils/format';
 
 interface PairRankingProps {
   accent: string;
-  icon: string;
+  icon: ReactNode;
   ranking: PairAffinity[];
   scoreKey: 'similarityRate' | 'oppositionRate';
   scoreLabel: string;

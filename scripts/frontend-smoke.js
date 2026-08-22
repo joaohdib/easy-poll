@@ -1,8 +1,10 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs/promises');
 const express = require('express');
 const puppeteer = require('puppeteer');
+const QRCode = require('qrcode');
 
 async function main() {
   const app = express();
@@ -15,9 +17,13 @@ async function main() {
     lastPlaceEligiblePolls: 1, lastPlaceRate: 0, validTimingSamples: 0,
     averageVoteDelaySeconds: null
   };
+  let connectionMode = 'connected';
+  const mockQrDataUrl = await QRCode.toDataURL('easypoll-phase-12-visual-mock');
   app.get('/api/status', (_request, response) => response.json({
-    status: 'connected', connected: true, hasQrCode: false, error: null
+    status: connectionMode, connected: connectionMode === 'connected',
+    hasQrCode: connectionMode === 'waiting_qr', error: null
   }));
+  app.get('/api/qr', (_request, response) => response.json({ dataUrl: mockQrDataUrl }));
   app.get('/api/groups', (_request, response) => response.json({ groups: [group] }));
   app.get('/api/groups/:groupId/members', (_request, response) => response.json({
     members: [{ id: 'ana@c.us', name: 'Ana', numberHint: '**1234', profilePicUrl: null }],
@@ -119,18 +125,19 @@ async function main() {
     ));
 
     const expected = [
-      [`/?groupId=${encodeURIComponent(group.id)}`, 'EasyPoll'],
+      [`/?groupId=${encodeURIComponent(group.id)}`, 'Criar enquete'],
       [`/history?groupId=${encodeURIComponent(group.id)}`, 'Histórico'],
-      [`/stats?groupId=${encodeURIComponent(group.id)}`, 'EasyPoll Stats']
+      [`/stats?groupId=${encodeURIComponent(group.id)}`, 'Estatísticas']
     ];
     for (const [route, heading] of expected) {
-      const response = await page.goto(`http://127.0.0.1:${port}${route}`, { waitUntil: 'networkidle0' });
+      console.log(`[smoke] abrindo ${route}`);
+      const response = await page.goto(`http://127.0.0.1:${port}${route}`, { waitUntil: 'domcontentloaded', timeout: 10_000 });
       if (response?.status() !== 200) throw new Error(`${route} retornou ${response?.status()}.`);
       await page.waitForSelector('h1');
       const renderedHeading = await page.$eval('h1', (element) => element.textContent);
       if (renderedHeading !== heading) throw new Error(`${route} renderizou “${renderedHeading}”.`);
       console.log(`[smoke] ${route} -> 200 + React (${heading})`);
-      if (heading === 'EasyPoll') {
+      if (heading === 'Criar enquete') {
         await page.waitForSelector('.group-row.selected');
         const optionCount = await page.$$eval('.poll-option', (elements) => elements.length);
         if (optionCount !== 2) throw new Error('O formulário principal não preservou duas opções iniciais.');
@@ -164,11 +171,71 @@ async function main() {
         await page.click('.history-detail-button');
         await page.waitForSelector('.history-detail-dialog[open] .history-participant');
       }
-      if (heading === 'EasyPoll Stats') {
+      if (heading === 'Estatísticas') {
         await page.waitForSelector('.stats-summary');
         const summaryCount = await page.$$eval('.summary-stat', (elements) => elements.length);
         if (summaryCount !== 6) throw new Error('Stats não renderizou os seis itens de resumo.');
+        const statCardCount = await page.$$eval('.stat-card', (elements) => elements.length);
+        const pairRankingCount = await page.$$eval('.affinity-ranking', (elements) => elements.length);
+        if (statCardCount !== 16 || pairRankingCount !== 2) {
+          throw new Error(`Stats perdeu conteúdo visual: ${statCardCount} cards e ${pairRankingCount} rankings de pares.`);
+        }
       }
+    }
+
+    if (process.env.EASYPOLL_VISUAL === '1') {
+      const screenshotDir = path.join(__dirname, '..', 'docs', 'screenshots', 'phase-12');
+      await fs.mkdir(screenshotDir, { recursive: true });
+      const viewports = [
+        { name: 'desktop-1440x900', width: 1440, height: 900 },
+        { name: 'notebook-1280x800', width: 1280, height: 800 },
+        { name: 'tablet-768x1024', width: 768, height: 1024 },
+        { name: 'mobile-390x844', width: 390, height: 844 }
+      ];
+      const visualRoutes = [
+        { name: 'create', path: `/?groupId=${encodeURIComponent(group.id)}` },
+        { name: 'history', path: `/history?groupId=${encodeURIComponent(group.id)}` },
+        { name: 'stats', path: `/stats?groupId=${encodeURIComponent(group.id)}` }
+      ];
+      for (const viewport of viewports) {
+        await page.setViewport({ width: viewport.width, height: viewport.height, deviceScaleFactor: 1 });
+        for (const route of visualRoutes) {
+          await page.goto(`http://127.0.0.1:${port}${route.path}`, { waitUntil: 'domcontentloaded' });
+          await page.waitForSelector('h1');
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+          if (overflow) throw new Error(`${route.path} possui overflow horizontal em ${viewport.name}.`);
+          const target = path.join(screenshotDir, `${route.name}-${viewport.name}.png`);
+          await page.screenshot({ path: target, fullPage: true });
+          console.log(`[visual] ${route.path} ${viewport.name} sem overflow`);
+        }
+      }
+
+      await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
+      await page.goto(`http://127.0.0.1:${port}/?groupId=${encodeURIComponent(group.id)}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.group-row.selected');
+      await page.click('.mobile-menu-button');
+      await page.waitForSelector('.mobile-menu-sheet[data-state="open"]');
+      await page.screenshot({ path: path.join(screenshotDir, 'mobile-navigation-390x844.png'), fullPage: false });
+      await page.keyboard.press('Escape');
+      const memberAction = (await page.$$('.option-actions button'))[2];
+      await memberAction.click();
+      await page.waitForSelector('.member-dialog[open] .member-card');
+      await page.screenshot({ path: path.join(screenshotDir, 'member-selector-mobile-390x844.png'), fullPage: false });
+      await page.keyboard.press('Escape');
+
+      await page.goto(`http://127.0.0.1:${port}/history?groupId=${encodeURIComponent(group.id)}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.history-page-poll');
+      await page.click('.history-detail-button');
+      await page.waitForSelector('.history-detail-dialog[open] .history-participant');
+      await page.screenshot({ path: path.join(screenshotDir, 'poll-details-mobile-390x844.png'), fullPage: false });
+
+      connectionMode = 'waiting_qr';
+      await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
+      await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.qr-panel img');
+      await page.screenshot({ path: path.join(screenshotDir, 'qr-state-notebook-1280x800.png'), fullPage: false });
+      connectionMode = 'connected';
     }
 
     const apiResponse = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`);

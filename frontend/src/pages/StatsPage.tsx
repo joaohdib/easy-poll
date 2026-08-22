@@ -44,8 +44,8 @@ export function StatsPage() {
   return (
     <AppShell
       current="stats"
-      eyebrow="Análise de participação"
-      title="EasyPoll Stats"
+      eyebrow="As histórias por trás dos votos"
+      title="Estatísticas"
       subtitle={groupName}
       footer="Os dados existem somente nesta sessão local e incluem apenas informações relacionadas às enquetes."
     >

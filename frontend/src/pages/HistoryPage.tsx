@@ -123,7 +123,7 @@ export function HistoryPage() {
   return (
     <AppShell
       current="history"
-      eyebrow="Dados persistidos no SQLite"
+      eyebrow="Sua biblioteca local de enquetes"
       title="Histórico"
       subtitle="Navegue pelas enquetes armazenadas sem reler conversas do WhatsApp."
       footer="O histórico consulta somente dados de enquetes armazenados localmente."

@@ -1,9 +1,11 @@
+import type { ReactNode } from 'react';
+
 export interface StatsCardProps {
   accent?: string;
   description: string;
   emptyTitle?: string;
   explanation?: string;
-  icon: string;
+  icon: ReactNode;
   name?: string | null;
   title: string;
   value: string;

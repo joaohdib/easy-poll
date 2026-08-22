@@ -1,8 +1,9 @@
 import type { PollResult } from '../../types/api';
 import { plural } from '../../utils/format';
+import type { ReactNode } from 'react';
 
 interface PollStatCardProps {
-  icon: string;
+  icon: ReactNode;
   poll: (PollResult & { leaders?: Array<{ name: string; voteCount: number }>; difference?: number }) | null;
   title: string;
   type: 'highest' | 'closest';
