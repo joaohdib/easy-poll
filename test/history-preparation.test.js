@@ -3,10 +3,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  WhatsAppService,
+  HistoryService,
   POLL_SCAN_MAX_LIMIT,
   HISTORY_PREPARE_MAX_LIMIT
-} = require('../src/whatsapp');
+} = require('../src/services/history.service');
 
 test('allows history preparation and poll scanning limits up to 500,000 messages', () => {
   assert.equal(POLL_SCAN_MAX_LIMIT, 500_000);
@@ -14,14 +14,16 @@ test('allows history preparation and poll scanning limits up to 500,000 messages
 });
 
 function makeService(counts) {
-  const service = Object.create(WhatsAppService.prototype);
+  const service = Object.create(HistoryService.prototype);
   service.historyPrepareTimeoutMs = 1000;
   service.historyPrepareDelayMs = 0;
   service.historyPrepareStableAttempts = 3;
   service.historyPreparationByGroup = new Map();
   service.activeHistoryPreparation = null;
-  service.loadEarlierGroupMessages = async () => ({ loadedMessages: 50 });
-  service.countAvailableGroupMessages = async () => counts.shift() ?? counts.at(-1) ?? 0;
+  service.whatsapp = {
+    loadEarlierGroupMessages: async () => ({ loadedMessages: 50 }),
+    countAvailableGroupMessages: async () => counts.shift() ?? counts.at(-1) ?? 0
+  };
   return service;
 }
 

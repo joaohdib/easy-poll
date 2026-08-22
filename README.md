@@ -1,5 +1,19 @@
 # EasyPoll — enquetes no WhatsApp
 
+## Frontend React
+
+O frontend fica em `frontend/` e usa React, TypeScript e Vite. Em
+desenvolvimento, `npm run dev` inicia o Express com watch na porta 3000 e o Vite
+com HMR em [http://localhost:5173](http://localhost:5173); o proxy de `/api`
+dispensa CORS e URLs absolutas no cliente.
+
+Para produção local, `npm run build` compila backend e frontend e `npm start`
+inicia somente o Express em [http://localhost:3000](http://localhost:3000). Use
+`npm run typecheck` para validar os dois projetos, `npm run check` para validar
+tipos e bundle e `npm run smoke:web` depois do build para o smoke headless de
+`/`, `/history`, `/stats` e do 404 de API. A arquitetura completa está em
+[`docs/phase-10-react-migration.md`](docs/phase-10-react-migration.md).
+
 Aplicação web local para conectar uma conta pelo QR Code, montar enquetes rapidamente e enviá-las a **um grupo escolhido manualmente**.
 
 ## Requisitos
@@ -16,7 +30,33 @@ npm install
 npm run dev
 ```
 
-Abra [http://localhost:3000](http://localhost:3000). Para executar sem reinicialização automática, use `npm start`.
+Abra [http://localhost:3000](http://localhost:3000). Para verificar e compilar o
+backend TypeScript, use `npm run typecheck` e `npm run build`. Depois do build,
+`npm start` executa a saída compilada sem reinicialização automática.
+
+## Banco de dados local
+
+O EasyPoll possui a infraestrutura local de persistência com SQLite,
+`better-sqlite3` e Drizzle ORM. O banco padrão fica em `data/easypoll.db`; a
+pasta é criada automaticamente e os arquivos SQLite são ignorados pelo Git.
+
+O schema code-first está em `src/db/schema.ts`. As migrations SQL versionadas
+ficam em `drizzle/` e são aplicadas automaticamente antes de o Express e o ciclo
+do WhatsApp iniciarem, tanto em `npm run dev` quanto em `npm start`. A estrutura
+inicial contém `groups`, `members`, `polls`, `poll_options`, `poll_votes`,
+`processed_messages` e `sync_state`. Todos os timestamps persistidos usam Unix
+epoch em segundos.
+
+Use `npm run db:generate` depois de uma alteração intencional no schema para
+gerar uma nova migration. `npm run db:migrate` permite aplicar migrations
+manualmente, embora isso não seja necessário no startup normal.
+
+O scanner e as sincronizações incrementais alimentam essas tabelas de forma
+transacional. Histórico e Stats consultam exclusivamente o SQLite e continuam
+disponíveis mesmo quando o WhatsApp está desconectado. `processed_messages`
+guarda somente ID, grupo, tipo e timestamp para deduplicação; nenhuma conversa
+normal, corpo de mensagem ou mídia é armazenada. O banco permanece somente na
+máquina em que o EasyPoll é executado.
 
 ## Como conectar
 
@@ -63,7 +103,7 @@ contagens reais e nunca afirma que o histórico está completo. Veja o
 
 ## Limitações e aviso importante
 
-- Este MVP não possui login próprio, banco de dados, deploy ou suporte a múltiplas contas.
+- Este MVP não possui login próprio, integração do scanner com a persistência, deploy ou suporte a múltiplas contas.
 - A sessão fica armazenada localmente e qualquer pessoa com acesso à máquina poderá abrir a interface enquanto o servidor estiver ativo.
 - O QR Code não é salvo pela aplicação.
 - Fotos são carregadas sob demanda, com concorrência limitada, e não são baixadas para disco. Quando indisponíveis, a interface usa iniciais.
