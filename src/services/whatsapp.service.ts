@@ -112,6 +112,7 @@ class WhatsAppService {
   initializationRetryCount: number;
   initializationRetryTimer: ReturnType<typeof setTimeout> | null;
   connectionLostListeners: Set<() => void>;
+  readyClient: InstanceType<typeof Client> | null;
   client!: InstanceType<typeof Client>;
 
   constructor() {
@@ -123,6 +124,7 @@ class WhatsAppService {
     this.initializationRetryCount = 0;
     this.initializationRetryTimer = null;
     this.connectionLostListeners = new Set();
+    this.readyClient = null;
     this.createClient();
   }
 
@@ -138,6 +140,7 @@ class WhatsAppService {
           : []
       }
     });
+    this.readyClient = null;
     this.client = client;
     this.clientGeneration += 1;
     this.registerEvents(client, this.clientGeneration);
@@ -177,6 +180,7 @@ class WhatsAppService {
     client.on('ready', () => {
       if (!isCurrentClient()) return;
       this.initializationRetryCount = 0;
+      this.readyClient = client;
       this.status = CONNECTION_STATUS.CONNECTED;
       this.qrDataUrl = null;
       this.lastError = null;
@@ -185,6 +189,7 @@ class WhatsAppService {
 
     client.on('auth_failure', (message: string) => {
       if (!isCurrentClient()) return;
+      this.readyClient = null;
       this.notifyConnectionLost();
       this.status = CONNECTION_STATUS.AUTH_FAILURE;
       this.qrDataUrl = null;
@@ -194,6 +199,7 @@ class WhatsAppService {
 
     client.on('disconnected', (reason: string) => {
       if (!isCurrentClient()) return;
+      this.readyClient = null;
       this.notifyConnectionLost();
       this.status = CONNECTION_STATUS.DISCONNECTED;
       this.qrDataUrl = null;
@@ -224,6 +230,20 @@ class WhatsAppService {
     error: unknown
   ): Promise<void> {
     if (this.client !== client) return;
+
+    // whatsapp-web.js 1.34.7 emits `ready` from inject() before it finishes
+    // exposing a few auxiliary browser callbacks. A late timeout from one of
+    // those callbacks must not overwrite a client that already reached ready.
+    // Real auth_failure/disconnected events update the status independently.
+    if (this.readyClient === client) {
+      this.status = CONNECTION_STATUS.CONNECTED;
+      this.lastError = null;
+      console.warn(
+        '[WhatsApp] Inicialização terminou com erro após o cliente ficar pronto; mantendo a conexão:',
+        getErrorMessage(error)
+      );
+      return;
+    }
 
     if (isTransientInitializationError(error)
       && this.initializationRetryCount < INITIALIZATION_MAX_RETRIES) {
@@ -296,6 +316,7 @@ class WhatsAppService {
 
   async logout() {
     this.ensureConnected();
+    this.readyClient = null;
     this.notifyConnectionLost();
     const client = this.client;
     this.status = CONNECTION_STATUS.CONNECTING;
@@ -719,6 +740,7 @@ class WhatsAppService {
   }
 
   async shutdown(): Promise<void> {
+    this.readyClient = null;
     this.notifyConnectionLost();
     if (this.initializationRetryTimer) {
       clearTimeout(this.initializationRetryTimer);
