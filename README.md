@@ -26,10 +26,22 @@ O EasyPoll possui a infraestrutura local de persistência com SQLite,
 `better-sqlite3` e Drizzle ORM. O banco padrão fica em `data/easypoll.db`; a
 pasta é criada automaticamente e os arquivos SQLite são ignorados pelo Git.
 
-Nesta fase, nenhuma tabela de domínio foi criada e nenhum dado do WhatsApp é
-persistido. O schema, as migrations e a persistência real serão implementados
-nas próximas fases. O arquivo permanece somente na máquina em que o EasyPoll é
-executado.
+O schema code-first está em `src/db/schema.ts`. As migrations SQL versionadas
+ficam em `drizzle/` e são aplicadas automaticamente antes de o Express e o ciclo
+do WhatsApp iniciarem, tanto em `npm run dev` quanto em `npm start`. A estrutura
+inicial contém `groups`, `members`, `polls`, `poll_options`, `poll_votes`,
+`processed_messages` e `sync_state`. Todos os timestamps persistidos usam Unix
+epoch em segundos.
+
+Use `npm run db:generate` depois de uma alteração intencional no schema para
+gerar uma nova migration. `npm run db:migrate` permite aplicar migrations
+manualmente, embora isso não seja necessário no startup normal.
+
+Nesta fase, o scanner ainda não alimenta essas tabelas: histórico, Stats e os
+demais fluxos continuam em memória. `processed_messages` guarda somente ID,
+grupo, tipo e timestamp para futura deduplicação; nenhuma conversa normal,
+corpo de mensagem ou mídia é armazenada. O banco permanece somente na máquina
+em que o EasyPoll é executado.
 
 ## Como conectar
 
@@ -76,7 +88,7 @@ contagens reais e nunca afirma que o histórico está completo. Veja o
 
 ## Limitações e aviso importante
 
-- Este MVP não possui login próprio, persistência de dados do domínio, deploy ou suporte a múltiplas contas.
+- Este MVP não possui login próprio, integração do scanner com a persistência, deploy ou suporte a múltiplas contas.
 - A sessão fica armazenada localmente e qualquer pessoa com acesso à máquina poderá abrir a interface enquanto o servidor estiver ativo.
 - O QR Code não é salvo pela aplicação.
 - Fotos são carregadas sob demanda, com concorrência limitada, e não são baixadas para disco. Quando indisponíveis, a interface usa iniciais.

@@ -9,6 +9,7 @@ const {
   createDatabase,
   resolveDefaultDatabasePath
 } = require('../src/db/database');
+const { resolveMigrationsPath } = require('../src/db/migrate');
 
 test('creates a local directory, opens SQLite through Drizzle and closes it', () => {
   const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'easypoll-database-'));
@@ -49,6 +50,16 @@ test('resolves source and compiled modules to the same project database', () => 
   const sourcePath = resolveDefaultDatabasePath(path.join(projectRoot, 'src', 'db'));
   const compiledPath = resolveDefaultDatabasePath(path.join(projectRoot, 'dist', 'db'));
   const expectedPath = path.join(projectRoot, 'data', 'easypoll.db');
+
+  assert.equal(sourcePath, expectedPath);
+  assert.equal(compiledPath, expectedPath);
+});
+
+test('resolves source and compiled modules to the same versioned migrations folder', () => {
+  const projectRoot = path.resolve('virtual-project');
+  const sourcePath = resolveMigrationsPath(path.join(projectRoot, 'src', 'db'));
+  const compiledPath = resolveMigrationsPath(path.join(projectRoot, 'dist', 'db'));
+  const expectedPath = path.join(projectRoot, 'drizzle');
 
   assert.equal(sourcePath, expectedPath);
   assert.equal(compiledPath, expectedPath);

@@ -1,6 +1,6 @@
 # Resumo do MVP — EasyPoll
 
-Estado atualizado em 20/08/2026.
+Estado atualizado em 21/08/2026.
 
 ## O que está disponível
 
@@ -50,7 +50,9 @@ Estado atualizado em 20/08/2026.
   - exibe um resumo e o JSON bruto sanitizado;
   - não salva os resultados.
 - Mensagens comuns são carregadas apenas quando necessário para localizar enquetes, descartadas no backend e nunca enviadas ao frontend ou registradas com seu conteúdo.
-- Nenhum banco de dados, autenticação própria, envio em massa ou automação de disparos.
+- Schema SQLite local com migrations versionadas e automáticas no startup; o scanner ainda não grava dados no banco.
+- Nenhuma conversa normal é armazenada: `processed_messages` contém somente metadados mínimos de sincronização.
+- Nenhuma autenticação própria, envio em massa ou automação de disparos.
 
 ## Como executar
 
@@ -123,6 +125,9 @@ Exemplo do corpo da análise experimental:
 ## Estrutura principal
 
 - `src/server.ts` — configuração do Express, montagem das rotas e bootstrap.
+- `src/db/schema.ts` — schema SQLite local de grupos, membros, enquetes, opções, votos e sincronização.
+- `src/db/migrate.ts` — aplicação das migrations SQL versionadas de `drizzle/`.
+- `src/db/database.ts` — factory testável de conexões SQLite com foreign keys habilitadas.
 - `src/domain/types.ts` — contratos internos compartilhados do EasyPoll.
 - `src/routes/` — endpoints HTTP agrupados por responsabilidade e validações de entrada.
 - `src/services/whatsapp.service.ts` — conexão e fronteira de compatibilidade com WhatsApp Web.

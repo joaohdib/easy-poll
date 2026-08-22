@@ -95,7 +95,7 @@ function toCodedError(error: unknown): CodedError {
 function initializeLocalDatabase(): void {
   try {
     initializeDatabase();
-    console.log('[Database] SQLite local disponível em data/easypoll.db');
+    console.log('[Database] SQLite local migrado e disponível em data/easypoll.db');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[Database] Falha ao inicializar o SQLite local: ${message}`);

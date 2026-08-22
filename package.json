@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "npm run typecheck && node --check public/app.js && node --check public/stats.js",
-    "test": "tsx --test"
+    "test": "tsx --test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "engines": {
     "node": ">=18"
