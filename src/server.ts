@@ -37,18 +37,11 @@ const analysisState: { latestPollScan: PollAnalysisInput | null } = {
   latestPollScan: null
 };
 const port = Number(process.env.PORT) || 3000;
+const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '20kb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
-
-app.get('/stats', (_request, response) => {
-  response.sendFile(path.join(__dirname, '..', 'public', 'stats.html'));
-});
-
-app.get('/history', (_request, response) => {
-  response.sendFile(path.join(__dirname, '..', 'public', 'history.html'));
-});
+app.use(express.static(frontendDist));
 
 app.use('/api', createWhatsAppRouter(whatsapp, analysisState));
 app.use('/api', createGroupsRouter(whatsapp));
@@ -58,6 +51,10 @@ app.use('/api', createHistoryRouter(historyQuery));
 
 app.use('/api', (_request, response) => {
   response.status(404).json({ error: 'Endpoint não encontrado.' });
+});
+
+app.get(/^(?!\/api(?:\/|$)).*/, (_request, response) => {
+  response.sendFile(path.join(frontendDist, 'index.html'));
 });
 
 const apiErrorHandler: ErrorRequestHandler = (error: unknown, _request, response, _next) => {

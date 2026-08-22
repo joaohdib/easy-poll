@@ -1,5 +1,19 @@
 # EasyPoll — enquetes no WhatsApp
 
+## Frontend React
+
+O frontend fica em `frontend/` e usa React, TypeScript e Vite. Em
+desenvolvimento, `npm run dev` inicia o Express com watch na porta 3000 e o Vite
+com HMR em [http://localhost:5173](http://localhost:5173); o proxy de `/api`
+dispensa CORS e URLs absolutas no cliente.
+
+Para produção local, `npm run build` compila backend e frontend e `npm start`
+inicia somente o Express em [http://localhost:3000](http://localhost:3000). Use
+`npm run typecheck` para validar os dois projetos, `npm run check` para validar
+tipos e bundle e `npm run smoke:web` depois do build para o smoke headless de
+`/`, `/history`, `/stats` e do 404 de API. A arquitetura completa está em
+[`docs/phase-10-react-migration.md`](docs/phase-10-react-migration.md).
+
 Aplicação web local para conectar uma conta pelo QR Code, montar enquetes rapidamente e enviá-las a **um grupo escolhido manualmente**.
 
 ## Requisitos
@@ -37,11 +51,12 @@ Use `npm run db:generate` depois de uma alteração intencional no schema para
 gerar uma nova migration. `npm run db:migrate` permite aplicar migrations
 manualmente, embora isso não seja necessário no startup normal.
 
-Nesta fase, o scanner ainda não alimenta essas tabelas: histórico, Stats e os
-demais fluxos continuam em memória. `processed_messages` guarda somente ID,
-grupo, tipo e timestamp para futura deduplicação; nenhuma conversa normal,
-corpo de mensagem ou mídia é armazenada. O banco permanece somente na máquina
-em que o EasyPoll é executado.
+O scanner e as sincronizações incrementais alimentam essas tabelas de forma
+transacional. Histórico e Stats consultam exclusivamente o SQLite e continuam
+disponíveis mesmo quando o WhatsApp está desconectado. `processed_messages`
+guarda somente ID, grupo, tipo e timestamp para deduplicação; nenhuma conversa
+normal, corpo de mensagem ou mídia é armazenada. O banco permanece somente na
+máquina em que o EasyPoll é executado.
 
 ## Como conectar
 
