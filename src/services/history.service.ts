@@ -2,12 +2,16 @@ import type {
   HistoryPreparationJob,
   HistoryPreparationStatus,
   Poll,
+  PollScanPersistenceInput,
   PollScanResult,
+  ProcessedMessageMetadata,
   SerializedHistoryPreparation
 } from '../domain/types';
 import {
   cleanText,
+  createPersistablePoll,
   normalizeScannedPoll,
+  normalizeVoteTimestamp,
   normalizeWhatsAppId
 } from './poll.service';
 import type { PollMessage, WhatsAppService } from './whatsapp.service';
@@ -24,6 +28,16 @@ interface CodedError extends Error {
   code?: string;
 }
 
+interface ScanPersistence {
+  persistScan(input: PollScanPersistenceInput): unknown;
+}
+
+interface ProcessedMessageSource {
+  id?: unknown;
+  type?: unknown;
+  timestamp?: unknown;
+}
+
 export class HistoryService {
   pollScanInProgress = false;
   activeHistoryPreparation: HistoryPreparationJob | null = null;
@@ -32,7 +46,10 @@ export class HistoryService {
   historyPrepareDelayMs = HISTORY_PREPARE_DELAY_MS;
   historyPrepareStableAttempts = HISTORY_PREPARE_STABLE_ATTEMPTS;
 
-  constructor(readonly whatsapp: WhatsAppService) {
+  constructor(
+    readonly whatsapp: WhatsAppService,
+    readonly persistence: ScanPersistence | null = null
+  ) {
     whatsapp.onConnectionLost(() => this.cancelActiveHistoryPreparation('cancelled'));
   }
 
@@ -113,9 +130,12 @@ export class HistoryService {
       }
     }
 
+    const persistablePolls = polls.map((poll, index) => (
+      createPersistablePoll(poll, pollMessages[index]?.pollOptions)
+    ));
     console.log(`[WhatsApp] Found ${polls.length} poll messages`);
     console.log(`[WhatsApp] Votes recovered for ${pollsWithVotesAvailable}/${polls.length} polls`);
-    return {
+    const result: PollScanResult = {
       group,
       requestedLimit: limit,
       messagesScanned: messages.length,
@@ -124,6 +144,27 @@ export class HistoryService {
       messageTypes,
       polls
     };
+    if (this.persistence) {
+      try {
+        await this.persistence.persistScan({
+          group,
+          polls: persistablePolls,
+          processedMessages: messages.flatMap((message) => {
+            const metadata = createProcessedMessageMetadata(message, group.id);
+            return metadata ? [metadata] : [];
+          })
+        });
+      } catch (cause) {
+        console.error('[Persistence] Scan transaction failed:', getErrorMessage(cause));
+        const error = new Error(
+          'O histórico foi analisado, mas não pôde ser salvo no banco local.',
+          { cause }
+        ) as CodedError;
+        error.code = 'PERSISTENCE_FAILED';
+        throw error;
+      }
+    }
+    return result;
   }
 
   async getGroupHistoryStatus(groupId: string) {
@@ -313,6 +354,21 @@ export class HistoryService {
       error: job.error || null
     };
   }
+}
+
+export function createProcessedMessageMetadata(
+  message: ProcessedMessageSource,
+  groupId: string
+): ProcessedMessageMetadata | null {
+  const id = normalizeWhatsAppId(message.id);
+  const timestamp = normalizeVoteTimestamp(message.timestamp);
+  if (!id || timestamp === null) return null;
+  return {
+    id,
+    groupId,
+    type: cleanText(message.type, 100) || 'unknown',
+    timestamp
+  };
 }
 
 function delay(milliseconds: number): Promise<void> {

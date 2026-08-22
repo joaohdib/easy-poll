@@ -41,9 +41,12 @@ export const pollOptions = sqliteTable('poll_options', {
   pollId: text('poll_id').notNull()
     .references(() => polls.messageId, { onDelete: 'cascade' }),
   text: text('text').notNull(),
-  position: integer('position').notNull()
+  position: integer('position').notNull(),
+  whatsappLocalId: text('whatsapp_local_id')
 }, (table) => [
-  uniqueIndex('poll_options_poll_id_position_unique').on(table.pollId, table.position)
+  uniqueIndex('poll_options_poll_id_position_unique').on(table.pollId, table.position),
+  uniqueIndex('poll_options_poll_id_whatsapp_local_id_unique')
+    .on(table.pollId, table.whatsappLocalId)
 ]);
 
 export const pollVotes = sqliteTable('poll_votes', {

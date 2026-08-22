@@ -1,6 +1,6 @@
 import path from 'node:path';
 import express, { type ErrorRequestHandler } from 'express';
-import { closeDatabase, initializeDatabase } from './db';
+import { closeDatabase, getDatabase, initializeDatabase } from './db';
 import type { PollAnalysisInput } from './domain/types';
 import { createGroupsRouter } from './routes/groups.routes';
 import { createPollsRouter } from './routes/polls.routes';
@@ -12,6 +12,7 @@ import {
   validatePollScan
 } from './routes/validation';
 import { HistoryService } from './services/history.service';
+import { PersistenceService } from './services/persistence.service';
 import { WhatsAppService } from './services/whatsapp.service';
 
 interface CodedError extends Error {
@@ -22,7 +23,8 @@ initializeLocalDatabase();
 
 const app = express();
 const whatsapp = new WhatsAppService();
-const history = new HistoryService(whatsapp);
+const persistence = new PersistenceService(getDatabase());
+const history = new HistoryService(whatsapp, persistence);
 const analysisState: { latestPollScan: PollAnalysisInput | null } = {
   latestPollScan: null
 };

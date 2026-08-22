@@ -2,6 +2,8 @@ import type {
   Poll,
   PollAnalysis,
   PollAnalysisInput,
+  PersistablePoll,
+  PersistablePollOption,
   PollScanResult,
   PollVote
 } from '../domain/types';
@@ -229,6 +231,54 @@ export function normalizePollOptions(options: unknown): string[] {
     typeof option === 'string' ? option : isRecord(option) ? option.name : undefined,
     200
   )).filter((option): option is string => Boolean(option));
+}
+
+export function createPersistablePoll(
+  poll: Poll,
+  sourceOptions: unknown
+): PersistablePoll {
+  return {
+    messageId: poll.messageId,
+    question: poll.question,
+    timestamp: normalizeVoteTimestamp(poll.timestamp),
+    creatorId: poll.creatorId,
+    creatorName: poll.creatorName,
+    options: normalizePersistablePollOptions(sourceOptions),
+    allowMultipleAnswers: poll.allowMultipleAnswers,
+    votes: poll.votes.map((vote) => ({
+      voterId: vote.voterId,
+      voterName: vote.voterName,
+      selectedOptionIds: vote.selectedOptionIds.flatMap((value) => {
+        const normalized = normalizeOptionLocalId(value);
+        return normalized === null ? [] : [normalized];
+      }),
+      selectedOptions: [...vote.selectedOptions],
+      timestamp: normalizeVoteTimestamp(vote.timestamp)
+    })),
+    votesAvailable: poll.votesAvailable
+  };
+}
+
+export function normalizePersistablePollOptions(options: unknown): PersistablePollOption[] {
+  if (!Array.isArray(options)) return [];
+  return options.flatMap((option, position) => {
+    const text = cleanText(
+      typeof option === 'string' ? option : isRecord(option) ? option.name : undefined,
+      200
+    );
+    if (!text) return [];
+    return [{
+      text,
+      position,
+      whatsappLocalId: isRecord(option) ? normalizeOptionLocalId(option.localId) : null
+    }];
+  });
+}
+
+function normalizeOptionLocalId(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'string') return cleanString(value) || null;
+  return null;
 }
 
 export function normalizeVoteTimestamp(value: unknown): number | null {

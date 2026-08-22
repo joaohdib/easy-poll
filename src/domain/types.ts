@@ -49,6 +49,49 @@ export interface PollScanResult {
   polls: Poll[];
 }
 
+/**
+ * Internal persistence DTOs. They deliberately contain normalized EasyPoll
+ * data only; raw WhatsApp messages never cross the persistence boundary.
+ */
+export interface PersistablePollOption {
+  text: string;
+  position: number;
+  whatsappLocalId: string | null;
+}
+
+export interface PersistablePollVote {
+  voterId: string | null;
+  voterName: string | null;
+  selectedOptionIds: string[];
+  selectedOptions: string[];
+  timestamp: number | null;
+}
+
+export interface PersistablePoll {
+  messageId: string | null;
+  question: string;
+  timestamp: number | null;
+  creatorId: string | null;
+  creatorName: string | null;
+  options: PersistablePollOption[];
+  allowMultipleAnswers: boolean;
+  votes: PersistablePollVote[];
+  votesAvailable: boolean;
+}
+
+export interface ProcessedMessageMetadata {
+  id: string;
+  groupId: string;
+  type: string;
+  timestamp: number;
+}
+
+export interface PollScanPersistenceInput {
+  group: Group;
+  polls: PersistablePoll[];
+  processedMessages: ProcessedMessageMetadata[];
+}
+
 export interface PollParticipant {
   userId: string;
   name: string;
