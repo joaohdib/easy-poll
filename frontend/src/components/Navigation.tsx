@@ -1,7 +1,7 @@
-import { BarChart3, Clock3, PlusCircle } from 'lucide-react';
+import { BarChart3, Clock3, PlusCircle, Settings2 } from 'lucide-react';
 
 interface NavigationProps {
-  current: 'create' | 'history' | 'stats';
+  current: 'create' | 'history' | 'stats' | 'settings';
   onNavigate?: () => void;
 }
 
@@ -9,7 +9,8 @@ export function Navigation({ current, onNavigate }: NavigationProps) {
   const links = [
     { key: 'create' as const, href: '/', label: 'Criar enquete', icon: PlusCircle },
     { key: 'history' as const, href: '/history', label: 'Histórico', icon: Clock3 },
-    { key: 'stats' as const, href: '/stats', label: 'Estatísticas', icon: BarChart3 }
+    { key: 'stats' as const, href: '/stats', label: 'Estatísticas', icon: BarChart3 },
+    { key: 'settings' as const, href: '/settings', label: 'Configurações', icon: Settings2 }
   ];
   return (
     <nav className="app-nav" aria-label="Navegação principal">

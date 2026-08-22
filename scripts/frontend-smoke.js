@@ -17,6 +17,7 @@ async function main() {
     lastPlaceEligiblePolls: 1, lastPlaceRate: 0, validTimingSamples: 0,
     averageVoteDelaySeconds: null
   };
+  let destructiveSettingsRequests = 0;
   let connectionMode = 'connected';
   const mockQrDataUrl = await QRCode.toDataURL('easypoll-phase-12-visual-mock');
   app.get('/api/status', (_request, response) => response.json({
@@ -35,6 +36,24 @@ async function main() {
   app.get('/api/local/groups', (_request, response) => response.json({
     groups: [{ ...group, pollCount: 1, lastSyncAt: 1_700_000_300 }]
   }));
+  app.get('/api/settings/storage', (_request, response) => response.json({
+    database: { fileName: 'easypoll.db', relativePath: 'data/easypoll.db', sizeBytes: 15_518_924 },
+    totals: { groups: 1, polls: 1, participations: 1, selections: 2, processedMessages: 12 },
+    groups: [{
+      id: group.id, name: group.name, polls: 1, participations: 1,
+      selections: 2, processedMessages: 12, lastSyncAt: 1_700_000_300,
+      oldestProcessedTimestamp: 1_700_000_000,
+      newestProcessedTimestamp: 1_700_000_300
+    }]
+  }));
+  app.delete('/api/settings/groups/:groupId/data', (_request, response) => {
+    destructiveSettingsRequests += 1;
+    response.json({ deleted: true });
+  });
+  app.delete('/api/settings/data', (_request, response) => {
+    destructiveSettingsRequests += 1;
+    response.json({ deleted: true });
+  });
   app.get('/api/groups/:groupId/sync-status', (request, response) => response.json({
     groupId: request.params.groupId, messagesProcessed: 12,
     oldestProcessedTimestamp: 1_700_000_000,
@@ -127,7 +146,8 @@ async function main() {
     const expected = [
       [`/?groupId=${encodeURIComponent(group.id)}`, 'Criar enquete'],
       [`/history?groupId=${encodeURIComponent(group.id)}`, 'Histórico'],
-      [`/stats?groupId=${encodeURIComponent(group.id)}`, 'Estatísticas']
+      [`/stats?groupId=${encodeURIComponent(group.id)}`, 'Estatísticas'],
+      ['/settings', 'Configurações']
     ];
     for (const [route, heading] of expected) {
       console.log(`[smoke] abrindo ${route}`);
@@ -181,10 +201,63 @@ async function main() {
           throw new Error(`Stats perdeu conteúdo visual: ${statCardCount} cards e ${pairRankingCount} rankings de pares.`);
         }
       }
+      if (heading === 'Configurações') {
+        await page.waitForSelector('.settings-storage');
+        await page.waitForSelector('.settings-group-card');
+        const settingsNavActive = await page.$eval(
+          '.app-sidebar .app-nav a[href="/settings"]',
+          (element) => element.classList.contains('active') && element.getAttribute('aria-current') === 'page'
+        );
+        if (!settingsNavActive) throw new Error('Configurações não ficou ativa na navegação.');
+
+        await page.click('.settings-group-card button');
+        await page.waitForSelector('.settings-dialog[open]');
+        if (destructiveSettingsRequests !== 0) throw new Error('Abrir o diálogo de grupo fez uma chamada destrutiva.');
+        await page.click('.settings-dialog[open] .settings-dialog-actions button:first-child');
+        await page.waitForSelector('.settings-dialog[open]', { hidden: true });
+
+        await page.click('.settings-danger > button');
+        await page.waitForSelector('#delete-all-confirmation');
+        const initiallyDisabled = await page.$eval(
+          '.settings-dialog[open] .settings-dialog-actions button:last-child',
+          (button) => button.disabled
+        );
+        if (!initiallyDisabled) throw new Error('Limpar tudo iniciou habilitado sem a frase de confirmação.');
+        await page.type('#delete-all-confirmation', 'LIMPAR TUDO');
+        const enabledAfterPhrase = await page.$eval(
+          '.settings-dialog[open] .settings-dialog-actions button:last-child',
+          (button) => !button.disabled
+        );
+        if (!enabledAfterPhrase) throw new Error('A frase de confirmação não habilitou a ação protegida.');
+        await page.click('.settings-dialog[open] .settings-dialog-actions button:first-child');
+        if (destructiveSettingsRequests !== 0) throw new Error('Cancelar um diálogo fez uma chamada destrutiva.');
+      }
+    }
+
+    const settingsViewports = [
+      { name: 'desktop-1440x900', width: 1440, height: 900 },
+      { name: 'tablet-768x1024', width: 768, height: 1024 },
+      { name: 'mobile-390x844', width: 390, height: 844 }
+    ];
+    for (const viewport of settingsViewports) {
+      await page.setViewport({ width: viewport.width, height: viewport.height, deviceScaleFactor: 1 });
+      await page.goto(`http://127.0.0.1:${port}/settings`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.settings-group-card');
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+      if (overflow) throw new Error(`/settings possui overflow horizontal em ${viewport.name}.`);
+      await page.click('.settings-danger > button');
+      const dialogFits = await page.$eval('.settings-dialog[open]', (dialog) => {
+        const bounds = dialog.getBoundingClientRect();
+        return bounds.left >= 0 && bounds.right <= window.innerWidth
+          && bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+      });
+      if (!dialogFits) throw new Error(`Diálogo de /settings saiu da tela em ${viewport.name}.`);
+      await page.keyboard.press('Escape');
+      console.log(`[smoke] /settings ${viewport.name} responsivo e sem overflow`);
     }
 
     if (process.env.EASYPOLL_VISUAL === '1') {
-      const screenshotDir = path.join(__dirname, '..', 'docs', 'screenshots', 'phase-12');
+      const screenshotDir = path.join(__dirname, '..', 'docs', 'screenshots', 'phase-13');
       await fs.mkdir(screenshotDir, { recursive: true });
       const viewports = [
         { name: 'desktop-1440x900', width: 1440, height: 900 },
@@ -195,7 +268,8 @@ async function main() {
       const visualRoutes = [
         { name: 'create', path: `/?groupId=${encodeURIComponent(group.id)}` },
         { name: 'history', path: `/history?groupId=${encodeURIComponent(group.id)}` },
-        { name: 'stats', path: `/stats?groupId=${encodeURIComponent(group.id)}` }
+        { name: 'stats', path: `/stats?groupId=${encodeURIComponent(group.id)}` },
+        { name: 'settings', path: '/settings' }
       ];
       for (const viewport of viewports) {
         await page.setViewport({ width: viewport.width, height: viewport.height, deviceScaleFactor: 1 });

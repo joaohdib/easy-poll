@@ -4,7 +4,7 @@ import type {
   HistoryPreparationStatus, IncrementalSyncResult, LocalGroupsResponse,
   LogoutResponse, PersistedStatsResult, PollHistoryDetail, PollHistoryListResult,
   PollScanResult, ProfilePictureResponse, QrResponse, SendPollInput, SendPollResponse,
-  SyncDirection
+  SyncDirection, SettingsStorageSummary, DeleteGroupDataResult, DeleteAllDataResult
 } from '../types/api';
 
 const groupPath = (groupId: string) => `/api/groups/${encodeURIComponent(groupId)}`;
@@ -47,5 +47,16 @@ export const api = {
   historyDetail: (groupId: string, messageId: string, signal?: AbortSignal) =>
     requestJson<PollHistoryDetail>(`${groupPath(groupId)}/history/${encodeURIComponent(messageId)}`, { signal }),
   stats: (groupId: string, signal?: AbortSignal) =>
-    requestJson<PersistedStatsResult>(`${groupPath(groupId)}/stats`, { signal })
+    requestJson<PersistedStatsResult>(`${groupPath(groupId)}/stats`, { signal }),
+  settingsStorage: (signal?: AbortSignal) =>
+    requestJson<SettingsStorageSummary>('/api/settings/storage', { signal }),
+  deleteGroupData: (groupId: string) =>
+    requestJson<DeleteGroupDataResult>(
+      `/api/settings/groups/${encodeURIComponent(groupId)}/data`,
+      { method: 'DELETE', body: JSON.stringify({ confirmGroupId: groupId }) }
+    ),
+  deleteAllData: () =>
+    requestJson<DeleteAllDataResult>('/api/settings/data', {
+      method: 'DELETE', body: JSON.stringify({ confirm: 'DELETE_ALL_LOCAL_DATA' })
+    })
 };

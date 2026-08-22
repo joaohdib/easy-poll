@@ -1,13 +1,21 @@
 import path from 'node:path';
 import express, { type ErrorRequestHandler } from 'express';
-import { closeDatabase, getDatabase, initializeDatabase } from './db';
+import {
+  closeDatabase,
+  databasePath,
+  getDatabase,
+  getSqliteConnection,
+  initializeDatabase
+} from './db';
 import type { PollAnalysisInput } from './domain/types';
 import { HistoryRepository } from './repositories/history.repository';
 import { StatsRepository } from './repositories/stats.repository';
+import { SettingsRepository } from './repositories/settings.repository';
 import { createGroupsRouter } from './routes/groups.routes';
 import { createHistoryRouter } from './routes/history.routes';
 import { createPollsRouter } from './routes/polls.routes';
 import { createStatsRouter } from './routes/stats.routes';
+import { createSettingsRouter } from './routes/settings.routes';
 import { createWhatsAppRouter } from './routes/whatsapp.routes';
 import {
   validateHistoryPrepare,
@@ -19,6 +27,7 @@ import { HistoryService } from './services/history.service';
 import { HistoryQueryService } from './services/history-query.service';
 import { PersistenceService } from './services/persistence.service';
 import { StatsQueryService } from './services/stats-query.service';
+import { SettingsService } from './services/settings.service';
 import { WhatsAppService } from './services/whatsapp.service';
 
 interface CodedError extends Error {
@@ -32,6 +41,10 @@ const whatsapp = new WhatsAppService();
 const persistence = new PersistenceService(getDatabase());
 const statsQuery = new StatsQueryService(new StatsRepository(getDatabase()));
 const historyQuery = new HistoryQueryService(new HistoryRepository(getDatabase()));
+const settings = new SettingsService(
+  new SettingsRepository(getSqliteConnection()),
+  databasePath
+);
 const history = new HistoryService(whatsapp, persistence);
 const analysisState: { latestPollScan: PollAnalysisInput | null } = {
   latestPollScan: null
@@ -48,6 +61,7 @@ app.use('/api', createGroupsRouter(whatsapp));
 app.use('/api', createPollsRouter(whatsapp, history, analysisState));
 app.use('/api', createStatsRouter(analysisState, statsQuery));
 app.use('/api', createHistoryRouter(historyQuery));
+app.use('/api', createSettingsRouter(settings));
 
 app.use('/api', (_request, response) => {
   response.status(404).json({ error: 'Endpoint não encontrado.' });

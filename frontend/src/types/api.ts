@@ -192,3 +192,36 @@ export interface StatsResult {
   minimumBehaviorParticipationRate: number; statsTimezone: string;
 }
 export interface PersistedStatsResult { stats: StatsResult; localData: GroupSyncStatus }
+
+export interface LocalDataTotals {
+  groups: number;
+  polls: number;
+  participations: number;
+  selections: number;
+  processedMessages: number;
+}
+export interface StoredGroupSummary {
+  id: string;
+  name: string;
+  polls: number;
+  participations: number;
+  selections: number;
+  processedMessages: number;
+  lastSyncAt: number | null;
+  oldestProcessedTimestamp: number | null;
+  newestProcessedTimestamp: number | null;
+}
+export interface SettingsStorageSummary {
+  database: { fileName: string; relativePath: string; sizeBytes: number };
+  totals: LocalDataTotals;
+  groups: StoredGroupSummary[];
+}
+export interface DeleteGroupDataResult {
+  deleted: true;
+  groupId: string;
+  removed: Omit<LocalDataTotals, 'groups'>;
+}
+export interface DeleteAllDataResult {
+  deleted: true;
+  removed: LocalDataTotals;
+}

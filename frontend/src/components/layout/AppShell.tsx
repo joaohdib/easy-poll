@@ -5,7 +5,7 @@ import { Navigation } from '../Navigation';
 import { Button } from '../ui/button';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '../ui/sheet';
 
-type PageName = 'create' | 'history' | 'stats';
+type PageName = 'create' | 'history' | 'stats' | 'settings';
 
 interface AppShellProps {
   children: ReactNode;
