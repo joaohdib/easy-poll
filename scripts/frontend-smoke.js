@@ -19,6 +19,13 @@ async function main() {
     status: 'connected', connected: true, hasQrCode: false, error: null
   }));
   app.get('/api/groups', (_request, response) => response.json({ groups: [group] }));
+  app.get('/api/groups/:groupId/members', (_request, response) => response.json({
+    members: [{ id: 'ana@c.us', name: 'Ana', numberHint: '**1234', profilePicUrl: null }],
+    totalMembers: 1
+  }));
+  app.get('/api/groups/:groupId/members/:memberId/profile-picture', (_request, response) => response.json({
+    profilePicUrl: null
+  }));
   app.get('/api/local/groups', (_request, response) => response.json({
     groups: [{ ...group, pollCount: 1, lastSyncAt: 1_700_000_300 }]
   }));
@@ -127,6 +134,30 @@ async function main() {
         await page.waitForSelector('.group-row.selected');
         const optionCount = await page.$$eval('.poll-option', (elements) => elements.length);
         if (optionCount !== 2) throw new Error('O formulário principal não preservou duas opções iniciais.');
+        await page.click('.favorite-button');
+        if (!await page.$('.favorite-button.active')) throw new Error('O favorito de grupo não foi preservado pela extração.');
+        await page.type('.group-search input', 'ausente');
+        await page.waitForSelector('.group-empty');
+        await page.$eval('.group-search input', (input) => {
+          input.value = '';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        const optionActions = await page.$$('.option-actions button');
+        await optionActions[1].click();
+        await page.waitForSelector('.bulk-dialog[open]');
+        await page.type('#bulk-text', 'Minecraft\nValorant\nGartic');
+        await page.click('.bulk-dialog .dialog-primary');
+        await page.waitForFunction(() => document.querySelectorAll('.poll-option').length === 3);
+        const memberAction = (await page.$$('.option-actions button'))[2];
+        await memberAction.click();
+        await page.waitForSelector('.member-dialog[open] .member-card');
+        await page.click('.member-card');
+        page.once('dialog', (dialog) => void dialog.accept());
+        await page.click('.member-dialog .dialog-primary');
+        await page.waitForFunction(() => document.querySelector('.poll-option')?.value === 'Ana');
+        await page.click('.checkbox-row input');
+        const multipleAnswers = await page.$eval('.checkbox-row input', (input) => input.checked);
+        if (!multipleAnswers) throw new Error('A opção de múltiplas respostas não pôde ser alterada.');
       }
       if (heading === 'Histórico') {
         await page.waitForSelector('.history-page-poll');

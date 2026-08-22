@@ -14,7 +14,7 @@ export const api = {
   qr: (signal?: AbortSignal) => requestJson<QrResponse>('/api/qr', { signal }),
   logout: () => requestJson<LogoutResponse>('/api/whatsapp/logout', { method: 'POST' }),
   groups: () => requestJson<GroupsResponse>('/api/groups'),
-  localGroups: () => requestJson<LocalGroupsResponse>('/api/local/groups'),
+  localGroups: (signal?: AbortSignal) => requestJson<LocalGroupsResponse>('/api/local/groups', { signal }),
   members: (groupId: string, signal?: AbortSignal) =>
     requestJson<GroupMembersResponse>(`${groupPath(groupId)}/members`, { signal }),
   profilePicture: (groupId: string, memberId: string, signal?: AbortSignal) =>
