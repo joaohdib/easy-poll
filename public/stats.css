@@ -5,6 +5,13 @@
 .stats-hero h1 { margin: 1px 0 5px; font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -.05em; }
 .stats-hero p { margin: 0; color: var(--muted); }
 .stats-hero .eyebrow { color: var(--green); }
+.local-stats-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 20px; margin-bottom: 20px; }
+.local-stats-picker { display: grid; grid-template-columns: minmax(160px, .7fr) minmax(220px, 1.3fr); align-items: end; gap: 18px; }
+.local-stats-picker .step { margin: 0 0 3px; }
+.local-stats-picker h2 { margin: 0; font-size: 1.08rem; }
+.local-stats-meta { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
+.local-stats-meta p { margin: 0; color: var(--muted); font-size: .74rem; text-align: right; }
+.local-stats-meta .button { width: auto; min-width: 116px; margin: 0; text-decoration: none; }
 .stats-message { text-align: center; }
 .stats-message-icon { display: block; margin-bottom: 10px; font-size: 2rem; }
 .stats-message h2 { margin: 0 0 8px; }
@@ -107,6 +114,9 @@
 }
 
 @media (max-width: 760px) {
+  .local-stats-controls, .local-stats-picker { grid-template-columns: 1fr; align-items: stretch; }
+  .local-stats-meta { justify-content: space-between; }
+  .local-stats-meta p { text-align: left; }
   .stats-summary { grid-template-columns: 1fr 1fr; }
   .stat-card-grid, .stat-card-grid.two-columns { grid-template-columns: 1fr 1fr; }
   .stat-card-grid#speed-cards .stat-card:first-child { grid-column: 1 / -1; }
@@ -124,6 +134,7 @@
   .stats-back { margin-bottom: 20px; }
   .stats-hero { align-items: flex-start; }
   .stats-hero .brand-mark { width: 50px; height: 50px; border-radius: 15px; }
+  .local-stats-meta { align-items: stretch; flex-direction: column; }
   .people-cards, .stat-card-grid, .stat-card-grid.two-columns,
   .stat-card-grid#behavior-cards { grid-template-columns: 1fr; }
   .stat-card-grid#speed-cards .stat-card:first-child { grid-column: auto; }

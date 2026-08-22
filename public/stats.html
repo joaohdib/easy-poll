@@ -24,6 +24,23 @@
         </div>
       </header>
 
+      <section class="card local-stats-controls" aria-labelledby="local-stats-title">
+        <div class="local-stats-picker">
+          <div>
+            <p class="step">Dados locais</p>
+            <h2 id="local-stats-title">Grupo armazenado</h2>
+          </div>
+          <label for="stats-group-select" class="sr-only">Selecionar grupo armazenado</label>
+          <select id="stats-group-select" aria-describedby="stats-local-data">
+            <option value="">Carregando grupos locais...</option>
+          </select>
+        </div>
+        <div class="local-stats-meta">
+          <p id="stats-local-data">Aguardando dados locais...</p>
+          <a id="stats-sync-link" class="button secondary" href="/">Sincronizar</a>
+        </div>
+      </section>
+
       <section id="stats-loading" class="card stats-message" role="status">Calculando estatísticas…</section>
 
       <section id="stats-empty" class="card stats-message" hidden>

@@ -31,7 +31,10 @@ export const polls = sqliteTable('polls', {
     .references(() => members.id, { onDelete: 'set null' }),
   question: text('question').notNull(),
   createdAt: integer('created_at').notNull(),
-  allowMultipleAnswers: integer('allow_multiple_answers', { mode: 'boolean' }).notNull()
+  allowMultipleAnswers: integer('allow_multiple_answers', { mode: 'boolean' }).notNull(),
+  votesSnapshotAvailable: integer('votes_snapshot_available', { mode: 'boolean' })
+    .notNull().default(false),
+  votesSnapshotAt: integer('votes_snapshot_at')
 }, (table) => [
   index('polls_group_id_created_at_idx').on(table.groupId, table.createdAt)
 ]);

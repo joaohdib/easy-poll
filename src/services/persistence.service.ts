@@ -1,5 +1,6 @@
 import type { EasyPollDatabase } from '../db/database';
 import type {
+  GroupSyncStatus,
   PersistablePoll,
   PersistablePollVote,
   PollScanPersistenceInput
@@ -65,6 +66,10 @@ export class PersistenceService {
           return;
         }
         this.polls.replaceVotes(poll.messageId, mapping.choices);
+        this.polls.markVotesSnapshotAvailable(
+          poll.messageId,
+          normalizeEpochSeconds(this.now())!
+        );
         votesReconciled += mapping.choices.length;
       });
 
@@ -84,6 +89,22 @@ export class PersistenceService {
     console.log(`[Persistence] Processed message metadata received: ${summary.processedMessagesReceived}`);
     console.log(`[Persistence] Known processed messages: ${summary.knownProcessedMessages}`);
     return summary;
+  }
+
+  getGroupSyncStatus(groupId: string): GroupSyncStatus {
+    return this.scanState.getSyncStatus(groupId);
+  }
+
+  findProcessedIds(messageIds: string[]): Set<string> {
+    return this.scanState.findProcessedIds(messageIds);
+  }
+
+  getOldestProcessedMessage(groupId: string) {
+    return this.scanState.getOldestProcessedMessage(groupId);
+  }
+
+  getNewestProcessedMessage(groupId: string) {
+    return this.scanState.getNewestProcessedMessage(groupId);
   }
 }
 

@@ -15,8 +15,14 @@ const elements = {
   rankingDenominator: document.querySelector('#ranking-denominator'),
   timestampBasis: document.querySelector('#timestamp-basis'),
   pollCards: document.querySelector('#poll-cards'),
-  activityCards: document.querySelector('#activity-cards')
+  activityCards: document.querySelector('#activity-cards'),
+  groupSelect: document.querySelector('#stats-group-select'),
+  localData: document.querySelector('#stats-local-data'),
+  syncLink: document.querySelector('#stats-sync-link')
 };
+
+const LAST_GROUP_STORAGE_KEY = 'easyPoll.lastGroupId';
+let statsRequestId = 0;
 
 const numberFormatter = new Intl.NumberFormat('pt-BR');
 const percentFormatter = new Intl.NumberFormat('pt-BR', {
@@ -47,6 +53,28 @@ function makeElement(tag, className, text) {
 
 function plural(value, singular, pluralForm) {
   return `${numberFormatter.format(value)} ${value === 1 ? singular : pluralForm}`;
+}
+
+function readLastGroupId() {
+  try {
+    return localStorage.getItem(LAST_GROUP_STORAGE_KEY) || '';
+  } catch (_error) {
+    return '';
+  }
+}
+
+function rememberGroupId(groupId) {
+  try {
+    localStorage.setItem(LAST_GROUP_STORAGE_KEY, groupId);
+  } catch (_error) {
+    // A seleção ainda funciona quando o armazenamento estiver indisponível.
+  }
+}
+
+function formatLocalTimestamp(timestamp) {
+  if (!timestamp) return 'nunca';
+  const date = new Date(timestamp * 1000);
+  return Number.isNaN(date.getTime()) ? 'indisponível' : date.toLocaleString('pt-BR');
 }
 
 function renderSummary(summary) {
@@ -407,24 +435,110 @@ function renderStats(stats) {
   elements.content.hidden = false;
 }
 
-async function loadStats() {
+function showEmpty(title, detail) {
+  elements.empty.querySelector('h2').textContent = title;
+  elements.empty.querySelector('p').textContent = detail;
+  elements.empty.hidden = false;
+  elements.content.hidden = true;
+}
+
+async function loadStats(groupId) {
+  const requestId = ++statsRequestId;
+  elements.loading.hidden = false;
+  elements.empty.hidden = true;
+  elements.content.hidden = true;
   try {
-    const response = await fetch('/api/stats', { cache: 'no-store' });
+    const response = await fetch(`/api/groups/${encodeURIComponent(groupId)}/stats`, {
+      cache: 'no-store'
+    });
     const data = await response.json().catch(() => ({}));
+    if (requestId !== statsRequestId) return;
     elements.loading.hidden = true;
-    if (!response.ok || !data.hasAnalysis) {
-      elements.groupName.textContent = 'Nenhuma análise disponível';
-      elements.empty.hidden = false;
+    if (!response.ok || !data.stats) {
+      elements.groupName.textContent = 'Dados locais indisponíveis';
+      showEmpty(
+        'Não foi possível carregar as estatísticas.',
+        data.error || 'Confira se o EasyPoll está em execução e tente novamente.'
+      );
+      return;
+    }
+    elements.localData.textContent = `Última sincronização: ${formatLocalTimestamp(data.localData?.lastSyncAt)} · ${plural(data.localData?.messagesProcessed || 0, 'mensagem processada', 'mensagens processadas')}`;
+    if (data.stats.summary.pollsFound === 0) {
+      elements.groupName.textContent = data.stats.summary.group?.name || 'Grupo sem nome';
+      showEmpty(
+        'Ainda não há enquetes importadas para este grupo.',
+        'Sincronize ou analise o histórico primeiro.'
+      );
       return;
     }
     renderStats(data.stats);
   } catch (_error) {
+    if (requestId !== statsRequestId) return;
     elements.loading.hidden = true;
     elements.groupName.textContent = 'Servidor indisponível';
-    elements.empty.querySelector('h2').textContent = 'Não foi possível carregar as estatísticas.';
-    elements.empty.querySelector('p').textContent = 'Confira se o EasyPoll está em execução e tente novamente.';
-    elements.empty.hidden = false;
+    showEmpty(
+      'Não foi possível carregar as estatísticas.',
+      'Confira se o EasyPoll está em execução e tente novamente.'
+    );
   }
 }
 
-loadStats();
+async function initializeStats() {
+  try {
+    const response = await fetch('/api/local/groups', { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Não foi possível listar os grupos locais.');
+    const groups = Array.isArray(data.groups) ? data.groups : [];
+    elements.groupSelect.replaceChildren(...groups.map((group) => {
+      const option = makeElement(
+        'option',
+        '',
+        `${group.name} (${plural(group.pollCount || 0, 'enquete', 'enquetes')})`
+      );
+      option.value = group.id;
+      return option;
+    }));
+
+    if (!groups.length) {
+      elements.groupSelect.replaceChildren(makeElement('option', '', 'Nenhum grupo armazenado'));
+      elements.groupSelect.disabled = true;
+      elements.loading.hidden = true;
+      elements.groupName.textContent = 'Nenhum dado local disponível';
+      elements.localData.textContent = 'Nenhum grupo foi importado para o SQLite.';
+      showEmpty(
+        'Ainda não há grupos armazenados.',
+        'Conecte o WhatsApp e importe ou sincronize o histórico de um grupo primeiro.'
+      );
+      return;
+    }
+
+    const requestedGroupId = new URLSearchParams(window.location.search).get('groupId') || '';
+    const preferredGroupId = [requestedGroupId, readLastGroupId()]
+      .find((candidate) => groups.some((group) => group.id === candidate)) || groups[0].id;
+    elements.groupSelect.value = preferredGroupId;
+    rememberGroupId(preferredGroupId);
+    elements.syncLink.href = `/?groupId=${encodeURIComponent(preferredGroupId)}`;
+    await loadStats(preferredGroupId);
+  } catch (error) {
+    elements.loading.hidden = true;
+    elements.groupName.textContent = 'Servidor indisponível';
+    elements.localData.textContent = 'Os grupos locais não puderam ser carregados.';
+    showEmpty(
+      'Não foi possível carregar as estatísticas.',
+      error.message || 'Confira se o EasyPoll está em execução e tente novamente.'
+    );
+  }
+}
+
+elements.groupSelect.addEventListener('change', () => {
+  const groupId = elements.groupSelect.value;
+  if (!groupId) return;
+  rememberGroupId(groupId);
+  elements.syncLink.href = `/?groupId=${encodeURIComponent(groupId)}`;
+  const url = new URL(window.location.href);
+  url.searchParams.set('groupId', groupId);
+  window.history.replaceState(null, '', url);
+  loadStats(groupId);
+});
+
+initializeStats();

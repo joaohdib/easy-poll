@@ -8,6 +8,9 @@ const { Client, LocalAuth, Poll } = WhatsAppWeb;
 const ChatConstructor = (WhatsAppWeb as unknown as {
   Chat: new (client: InstanceType<typeof Client>, data: Record<string, unknown>) => ChatInstance;
 }).Chat;
+const MessageConstructor = (WhatsAppWeb as unknown as {
+  Message: new (client: InstanceType<typeof Client>, data: Record<string, unknown>) => Message;
+}).Message;
 
 declare global {
   interface Window {
@@ -64,6 +67,11 @@ interface BrowserPollMessage {
 interface SerializedPollId {
   localId: string;
   serialized: string;
+}
+
+interface LoadedMessageModel {
+  model: Record<string, unknown>;
+  serializedId: string | null;
 }
 
 interface PollOptionLike {
@@ -528,7 +536,32 @@ class WhatsAppService {
     return { group, messages };
   }
 
-  async loadEarlierGroupMessages(groupId: string): Promise<{ loadedMessages: number }> {
+  async ensureGroupHistoryAnchor(groupId: string, messageId: string): Promise<boolean> {
+    return this.client.pupPage.evaluate(async ({ chatId, messageId }) => {
+      const collections = window.require('WAWebCollections');
+      const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
+      let message = collections.Msg.get(messageId);
+      const isInChat = () => chat?.msgs.getModelsArray().some((candidate: BrowserPollMessage) => {
+        const candidateId = candidate.id?._serialized || candidate.id?.toString?.();
+        return String(candidateId) === messageId;
+      });
+      if (!message || !isInChat()) {
+        const result = await collections.Msg.getMessagesById([messageId]);
+        message = result?.messages?.[0] || message;
+      }
+      if (!message || !chat) return false;
+      const serialized = message.id?._serialized || message.id?.toString?.();
+      const remote = message.id?.remote?._serialized
+        || message.id?.remote?.toString?.()
+        || message.id?.remote;
+      if (String(serialized) !== messageId || String(remote) !== chatId) return false;
+      return isInChat();
+    }, { chatId: groupId, messageId });
+  }
+
+  async loadEarlierGroupMessages(
+    groupId: string
+  ): Promise<{ loadedMessages: number }> {
     return this.client.pupPage.evaluate(async (chatId) => {
       const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
       const loader = window.require('WAWebChatLoadMessages');
@@ -538,6 +571,42 @@ class WhatsAppService {
       const loaded = await loader.loadEarlierMsgs({ chat });
       return { loadedMessages: Number(loaded?.length) || 0 };
     }, groupId);
+  }
+
+  async loadEarlierGroupMessagePage(
+    groupId: string,
+    timeoutMs = 30_000
+  ): Promise<{ loadedMessages: number; messages: Message[] }> {
+    const loaded = await this.client.pupPage.evaluate(async ({ chatId, timeoutMs }) => {
+      const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
+      const loader = window.require('WAWebChatLoadMessages');
+      if (!loader || typeof loader.loadEarlierMsgs !== 'function') {
+        throw new Error('WAWebChatLoadMessages.loadEarlierMsgs unavailable');
+      }
+      const messages = await Promise.race([
+        loader.loadEarlierMsgs({ chat }),
+        new Promise((_, reject) => setTimeout(
+          () => reject(new Error('loadEarlierMsgs timeout')),
+          timeoutMs
+        ))
+      ]);
+      if (!Array.isArray(messages)) return [];
+      return messages
+        .filter((message) => !message.isNotification)
+        .map((message): LoadedMessageModel => ({
+          model: window.WWebJS.getMessageModel(message),
+          serializedId: message.id?._serialized || message.id?.toString?.() || null
+        }));
+    }, { chatId: groupId, timeoutMs });
+
+    const messages = loaded.map(({ model, serializedId }) => {
+      const message = new MessageConstructor(this.client, model) as Message;
+      if (serializedId && message.id && !message.id._serialized) {
+        message.id._serialized = serializedId;
+      }
+      return message;
+    });
+    return { loadedMessages: messages.length, messages };
   }
 
   async countAvailableGroupMessages(groupId: string): Promise<number> {

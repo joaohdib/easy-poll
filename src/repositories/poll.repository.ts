@@ -115,6 +115,13 @@ export class PollRepository {
     });
   }
 
+  markVotesSnapshotAvailable(pollId: string, snapshotAt: number): void {
+    this.db.update(polls).set({
+      votesSnapshotAvailable: true,
+      votesSnapshotAt: snapshotAt
+    }).where(eq(polls.messageId, pollId)).run();
+  }
+
   findByMessageId(messageId: string): PersistedPollSnapshot | null {
     const poll = this.findRecordByMessageId(messageId);
     if (!poll) return null;

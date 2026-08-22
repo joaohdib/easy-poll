@@ -2,6 +2,8 @@ import type { SendPollInput } from '../domain/types';
 import {
   HISTORY_PREPARE_DEFAULT_LIMIT,
   HISTORY_PREPARE_MAX_LIMIT,
+  OLDER_SYNC_DEFAULT_LIMIT,
+  OLDER_SYNC_MAX_LIMIT,
   POLL_SCAN_DEFAULT_LIMIT,
   POLL_SCAN_MAX_LIMIT
 } from '../services/history.service';
@@ -18,6 +20,11 @@ export interface PollScanPayload {
 export interface HistoryPreparePayload {
   groupId: string;
   target: number;
+}
+
+export interface OlderSyncPayload {
+  groupId: string;
+  limit: number;
 }
 
 export function validatePoll(body: unknown): ValidationResult<SendPollInput> {
@@ -89,6 +96,23 @@ export function validateHistoryPrepare(
     return { error: `O alvo deve ser um número inteiro entre 1 e ${HISTORY_PREPARE_MAX_LIMIT}.` };
   }
   return { value: { groupId: group.value, target } };
+}
+
+export function validateOlderSync(
+  groupIdValue: unknown,
+  body: unknown
+): ValidationResult<OlderSyncPayload> {
+  const group = validateGroupId(groupIdValue);
+  if ('error' in group) return { error: group.error };
+  if (body !== undefined && !isRecord(body)) {
+    return { error: 'Corpo da solicitação inválido.' };
+  }
+  const requestBody = isRecord(body) ? body : undefined;
+  const limit = Number(requestBody?.limit ?? OLDER_SYNC_DEFAULT_LIMIT);
+  if (!Number.isInteger(limit) || limit < 1 || limit > OLDER_SYNC_MAX_LIMIT) {
+    return { error: `O limite deve ser um número inteiro entre 1 e ${OLDER_SYNC_MAX_LIMIT}.` };
+  }
+  return { value: { groupId: group.value, limit } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -2,17 +2,20 @@ import path from 'node:path';
 import express, { type ErrorRequestHandler } from 'express';
 import { closeDatabase, getDatabase, initializeDatabase } from './db';
 import type { PollAnalysisInput } from './domain/types';
+import { StatsRepository } from './repositories/stats.repository';
 import { createGroupsRouter } from './routes/groups.routes';
 import { createPollsRouter } from './routes/polls.routes';
 import { createStatsRouter } from './routes/stats.routes';
 import { createWhatsAppRouter } from './routes/whatsapp.routes';
 import {
   validateHistoryPrepare,
+  validateOlderSync,
   validatePoll,
   validatePollScan
 } from './routes/validation';
 import { HistoryService } from './services/history.service';
 import { PersistenceService } from './services/persistence.service';
+import { StatsQueryService } from './services/stats-query.service';
 import { WhatsAppService } from './services/whatsapp.service';
 
 interface CodedError extends Error {
@@ -24,6 +27,7 @@ initializeLocalDatabase();
 const app = express();
 const whatsapp = new WhatsAppService();
 const persistence = new PersistenceService(getDatabase());
+const statsQuery = new StatsQueryService(new StatsRepository(getDatabase()));
 const history = new HistoryService(whatsapp, persistence);
 const analysisState: { latestPollScan: PollAnalysisInput | null } = {
   latestPollScan: null
@@ -41,7 +45,7 @@ app.get('/stats', (_request, response) => {
 app.use('/api', createWhatsAppRouter(whatsapp, analysisState));
 app.use('/api', createGroupsRouter(whatsapp));
 app.use('/api', createPollsRouter(whatsapp, history, analysisState));
-app.use('/api', createStatsRouter(analysisState));
+app.use('/api', createStatsRouter(analysisState, statsQuery));
 
 app.use('/api', (_request, response) => {
   response.status(404).json({ error: 'Endpoint não encontrado.' });
@@ -56,7 +60,11 @@ const apiErrorHandler: ErrorRequestHandler = (error: unknown, _request, response
     WHATSAPP_LOGOUT_FAILED: 502,
     POLL_SCAN_BUSY: 409,
     POLL_MESSAGES_FETCH_FAILED: 502,
-    HISTORY_PREPARE_BUSY: 409
+    HISTORY_PREPARE_BUSY: 409,
+    INCREMENTAL_SYNC_BUSY: 409,
+    SYNC_BASELINE_REQUIRED: 409,
+    OLDER_SYNC_BOUNDARY_UNAVAILABLE: 409,
+    PERSISTENCE_UNAVAILABLE: 503
   };
   const codedError = toCodedError(error);
   const status = (codedError.code && knownErrors[codedError.code]) || 500;
@@ -109,5 +117,6 @@ export {
   app,
   validatePoll,
   validatePollScan,
-  validateHistoryPrepare
+  validateHistoryPrepare,
+  validateOlderSync
 };

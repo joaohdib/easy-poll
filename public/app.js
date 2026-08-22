@@ -28,6 +28,8 @@ const state = {
   pollScanResult: null,
   historyGroupId: null,
   historyPreparing: false,
+  incrementalSyncDirection: null,
+  syncStatusRequestId: 0,
   historyStatusRequestId: 0,
   historyPollTimer: null
 };
@@ -87,12 +89,24 @@ const elements = {
   cancelHistory: document.querySelector('#cancel-history'),
   historyPrepareMetric: document.querySelector('#history-prepare-metric strong'),
   historyPrepareDetail: document.querySelector('#history-prepare-detail'),
+  syncMessagesProcessed: document.querySelector('#sync-messages-processed'),
+  syncOldestTimestamp: document.querySelector('#sync-oldest-timestamp'),
+  syncLastAt: document.querySelector('#sync-last-at'),
+  syncDetail: document.querySelector('#sync-detail'),
+  syncNewer: document.querySelector('#sync-newer'),
+  syncNewerLabel: document.querySelector('#sync-newer .button-label'),
+  syncNewerSpinner: document.querySelector('#sync-newer .spinner'),
+  syncOlder: document.querySelector('#sync-older'),
+  syncOlderLabel: document.querySelector('#sync-older .button-label'),
+  syncOlderSpinner: document.querySelector('#sync-older .spinner'),
+  cancelSync: document.querySelector('#cancel-sync'),
   scanPolls: document.querySelector('#scan-polls'),
   scanPollsLabel: document.querySelector('#scan-polls .button-label'),
   scanPollsSpinner: document.querySelector('#scan-polls .spinner'),
   historyStatus: document.querySelector('#history-status'),
   historyResults: document.querySelector('#history-results'),
   historySummary: document.querySelector('#history-summary'),
+  viewStats: document.querySelector('#view-stats'),
   historyPolls: document.querySelector('#history-polls'),
   toggleRawJson: document.querySelector('#toggle-raw-json'),
   historyRawJson: document.querySelector('#history-raw-json'),
@@ -326,11 +340,127 @@ function selectGroup(groupId, persist = true) {
 
 function syncPollHistoryGroup() {
   const group = state.groups.find((candidate) => candidate.id === elements.group.value);
+  const syncRunning = Boolean(state.incrementalSyncDirection);
   elements.historyGroupName.textContent = group?.name || 'Selecione um grupo acima';
-  elements.scanPolls.disabled = state.scanningPolls || state.historyPreparing
+  elements.scanPolls.disabled = state.scanningPolls || state.historyPreparing || syncRunning
     || state.status !== 'connected' || !group;
-  elements.prepareHistory.disabled = state.historyPreparing || state.scanningPolls
+  elements.prepareHistory.disabled = state.historyPreparing || state.scanningPolls || syncRunning
     || state.status !== 'connected' || !group;
+  elements.syncNewer.disabled = syncRunning || state.historyPreparing || state.scanningPolls
+    || state.status !== 'connected' || !group;
+  elements.syncOlder.disabled = syncRunning || state.historyPreparing || state.scanningPolls
+    || state.status !== 'connected' || !group;
+}
+
+function formatSyncTimestamp(timestamp, includeTime = false) {
+  if (!Number.isFinite(Number(timestamp))) return '—';
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    dateStyle: 'short',
+    ...(includeTime ? { timeStyle: 'short' } : {})
+  }).format(new Date(Number(timestamp) * 1000));
+}
+
+function renderSyncStatus(data) {
+  elements.syncMessagesProcessed.textContent = Number(data.messagesProcessed || 0).toLocaleString('pt-BR');
+  elements.syncOldestTimestamp.textContent = formatSyncTimestamp(data.oldestProcessedTimestamp);
+  elements.syncLastAt.textContent = formatSyncTimestamp(data.lastSyncAt, true);
+  if (!data.messagesProcessed) {
+    elements.syncDetail.textContent = 'Nenhum histórico local encontrado. Use “Analisar enquetes” para fazer a importação inicial.';
+  } else if (!state.incrementalSyncDirection) {
+    elements.syncDetail.textContent = `${Number(data.messagesProcessed).toLocaleString('pt-BR')} IDs de mensagens armazenados sem conteúdo de conversas.`;
+  }
+}
+
+async function loadSyncStatus(groupId) {
+  if (!groupId) return;
+  const requestId = ++state.syncStatusRequestId;
+  try {
+    const data = await fetchJson(`/api/groups/${encodeURIComponent(groupId)}/sync-status`);
+    if (requestId !== state.syncStatusRequestId || elements.group.value !== groupId) return;
+    renderSyncStatus(data);
+  } catch (error) {
+    if (requestId === state.syncStatusRequestId && elements.group.value === groupId) {
+      elements.syncDetail.textContent = error.message;
+    }
+  }
+}
+
+function setIncrementalSyncing(direction) {
+  state.incrementalSyncDirection = direction;
+  elements.syncNewerLabel.textContent = direction === 'newer'
+    ? 'Procurando novidades…'
+    : 'Sincronizar novidades';
+  elements.syncOlderLabel.textContent = direction === 'older'
+    ? 'Buscando histórico anterior…'
+    : 'Buscar histórico mais antigo';
+  elements.syncNewerSpinner.hidden = direction !== 'newer';
+  elements.syncOlderSpinner.hidden = direction !== 'older';
+  elements.cancelSync.hidden = !direction;
+  elements.historyLimit.disabled = Boolean(direction) || state.historyPreparing || state.scanningPolls;
+  elements.historyPresets.forEach((button) => {
+    button.disabled = Boolean(direction) || state.historyPreparing || state.scanningPolls;
+  });
+  syncPollHistoryGroup();
+}
+
+function renderIncrementalSyncResult(result) {
+  if (result.cancelled) return 'Sincronização cancelada. Nenhuma alteração parcial foi persistida.';
+  if (result.timedOut) return 'O limite de tempo foi atingido. Nenhuma alteração parcial foi persistida.';
+  if (result.boundaryNotFound) {
+    return 'Não foi possível encontrar a fronteira do histórico local dentro do limite incremental de 5.000 mensagens. Use o scan manual como fallback.';
+  }
+  if (result.direction === 'newer') {
+    if (!result.newMessages) {
+      return `✓ Tudo atualizado. Nenhuma mensagem nova encontrada. ${result.pollsFound} enquete(s) recente(s) reconciliada(s).`;
+    }
+    return `✓ Sincronização concluída. ${result.newMessages.toLocaleString('pt-BR')} mensagens novas e ${result.pollsFound.toLocaleString('pt-BR')} enquete(s) encontrada(s).`;
+  }
+  if (!result.newMessages && result.reachedAvailableHistoryStart) {
+    return 'Nenhuma mensagem anterior adicional foi disponibilizada pelo WhatsApp Web nesta sessão.';
+  }
+  return `✓ Histórico expandido. ${result.newMessages.toLocaleString('pt-BR')} mensagens anteriores adicionadas.`;
+}
+
+async function runIncrementalSync(direction) {
+  const groupId = elements.group.value;
+  if (!groupId || state.incrementalSyncDirection) return;
+  setIncrementalSyncing(direction);
+  elements.syncDetail.textContent = direction === 'newer'
+    ? '⟳ Procurando novidades…'
+    : '⟳ Buscando histórico anterior…';
+  try {
+    const data = await fetchJson(
+      `/api/groups/${encodeURIComponent(groupId)}/sync/${direction}`,
+      direction === 'older'
+        ? {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: 1000 })
+          }
+        : { method: 'POST' }
+    );
+    if (elements.group.value !== groupId) return;
+    elements.syncDetail.textContent = renderIncrementalSyncResult(data);
+    await loadSyncStatus(groupId);
+  } catch (error) {
+    if (elements.group.value === groupId) {
+      elements.syncDetail.textContent = error.message;
+      showToast(error.message, true);
+    }
+  } finally {
+    if (elements.group.value === groupId) setIncrementalSyncing(null);
+  }
+}
+
+async function cancelIncrementalSync(groupId = elements.group.value) {
+  if (!groupId) return;
+  try {
+    await fetchJson(`/api/groups/${encodeURIComponent(groupId)}/sync`, { method: 'DELETE' });
+    if (elements.group.value === groupId) elements.syncDetail.textContent = 'Cancelamento solicitado…';
+  } catch (error) {
+    if (elements.group.value === groupId) showToast(error.message, true);
+  }
 }
 
 function clearHistoryPollTimer() {
@@ -343,8 +473,10 @@ function setHistoryPreparing(preparing) {
   elements.prepareHistoryLabel.textContent = preparing ? 'Carregando mensagens antigas…' : 'Preparar histórico';
   elements.prepareHistorySpinner.hidden = !preparing;
   elements.cancelHistory.hidden = !preparing;
-  elements.historyLimit.disabled = preparing || state.scanningPolls;
-  elements.historyPresets.forEach((button) => { button.disabled = preparing || state.scanningPolls; });
+  elements.historyLimit.disabled = preparing || state.scanningPolls || Boolean(state.incrementalSyncDirection);
+  elements.historyPresets.forEach((button) => {
+    button.disabled = preparing || state.scanningPolls || Boolean(state.incrementalSyncDirection);
+  });
   syncPollHistoryGroup();
 }
 
@@ -425,18 +557,30 @@ async function cancelGroupHistory(groupId = elements.group.value) {
 async function switchHistoryGroup() {
   const previousGroupId = state.historyGroupId;
   const nextGroupId = elements.group.value;
+  if (state.incrementalSyncDirection && previousGroupId && previousGroupId !== nextGroupId) {
+    await cancelIncrementalSync(previousGroupId);
+  }
   if (state.historyPreparing && previousGroupId && previousGroupId !== nextGroupId) {
     await cancelGroupHistory(previousGroupId);
   }
   clearHistoryPollTimer();
   state.historyStatusRequestId += 1;
   state.historyGroupId = nextGroupId || null;
+  state.syncStatusRequestId += 1;
+  setIncrementalSyncing(null);
+  elements.syncMessagesProcessed.textContent = '—';
+  elements.syncOldestTimestamp.textContent = '—';
+  elements.syncLastAt.textContent = '—';
+  elements.syncDetail.textContent = nextGroupId
+    ? 'Consultando histórico local…'
+    : 'Selecione um grupo para consultar o histórico local.';
   setHistoryPreparing(false);
   elements.historyPrepareMetric.textContent = '—';
   elements.historyPrepareDetail.textContent = nextGroupId
     ? 'Medindo mensagens disponíveis nesta sessão…'
     : 'Selecione um grupo para medir o histórico disponível nesta sessão.';
   resetPollHistory();
+  if (nextGroupId) await loadSyncStatus(nextGroupId);
   if (nextGroupId && state.status === 'connected') await loadHistoryPreparationStatus(nextGroupId);
 }
 
@@ -459,8 +603,10 @@ function setPollScanning(scanning) {
   state.scanningPolls = scanning;
   elements.scanPollsLabel.textContent = scanning ? 'Analisando histórico disponível…' : 'Analisar enquetes';
   elements.scanPollsSpinner.hidden = !scanning;
-  elements.historyLimit.disabled = scanning || state.historyPreparing;
-  elements.historyPresets.forEach((button) => { button.disabled = scanning || state.historyPreparing; });
+  elements.historyLimit.disabled = scanning || state.historyPreparing || Boolean(state.incrementalSyncDirection);
+  elements.historyPresets.forEach((button) => {
+    button.disabled = scanning || state.historyPreparing || Boolean(state.incrementalSyncDirection);
+  });
   syncPollHistoryGroup();
 }
 
@@ -576,6 +722,7 @@ function renderPollScan(data) {
     elements.historyPolls.appendChild(empty);
   }
   elements.historyRawJson.textContent = JSON.stringify(data, null, 2);
+  elements.viewStats.href = `/stats?groupId=${encodeURIComponent(data.group.id)}`;
   elements.historyResults.hidden = false;
 }
 
@@ -1072,6 +1219,9 @@ elements.historyLimit.addEventListener('input', () => setHistoryLimit(elements.h
 elements.scanPolls.addEventListener('click', scanPreviousPolls);
 elements.prepareHistory.addEventListener('click', prepareGroupHistory);
 elements.cancelHistory.addEventListener('click', () => cancelGroupHistory());
+elements.syncNewer.addEventListener('click', () => runIncrementalSync('newer'));
+elements.syncOlder.addEventListener('click', () => runIncrementalSync('older'));
+elements.cancelSync.addEventListener('click', () => cancelIncrementalSync());
 elements.toggleRawJson.addEventListener('click', toggleRawPollJson);
 document.addEventListener('keydown', (event) => {
   if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter' || elements.bulkDialog.open || elements.memberDialog.open) return;

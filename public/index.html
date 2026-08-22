@@ -124,11 +124,37 @@
           <span class="experimental-badge">Experimental</span>
         </div>
         <p class="history-description">Analisa somente as mensagens que o WhatsApp Web disponibilizar para esta sessão. Enquetes muito antigas podem não estar acessíveis.</p>
+        <a class="button secondary stats-link local-stats-entry" href="/stats">Ver estatísticas locais</a>
 
         <fieldset id="history-fields" class="history-fields" disabled>
           <div class="history-current-group">
             <span>Grupo atual</span>
             <strong id="history-group-name">Selecione um grupo acima</strong>
+          </div>
+          <div class="history-sync-panel">
+            <div class="history-prepare-heading">
+              <div>
+                <strong>Histórico local</strong>
+                <small>Sincronize apenas o delta conhecido pelo banco local.</small>
+              </div>
+            </div>
+            <dl class="history-sync-metrics">
+              <div><dt>Mensagens conhecidas</dt><dd id="sync-messages-processed">—</dd></div>
+              <div><dt>Disponível localmente desde</dt><dd id="sync-oldest-timestamp">—</dd></div>
+              <div><dt>Última sincronização</dt><dd id="sync-last-at">—</dd></div>
+            </dl>
+            <p id="sync-detail" class="history-prepare-detail" role="status" aria-live="polite">Selecione um grupo para consultar o histórico local.</p>
+            <div class="history-sync-actions">
+              <button id="sync-newer" class="button secondary" type="button">
+                <span class="button-label">Sincronizar novidades</span>
+                <span class="spinner dark" hidden></span>
+              </button>
+              <button id="sync-older" class="button secondary" type="button">
+                <span class="button-label">Buscar histórico mais antigo</span>
+                <span class="spinner dark" hidden></span>
+              </button>
+              <button id="cancel-sync" class="button history-cancel-button" type="button" hidden>Cancelar</button>
+            </div>
           </div>
           <div class="history-prepare-panel">
             <div class="history-prepare-heading">

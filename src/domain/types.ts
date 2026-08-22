@@ -92,6 +92,39 @@ export interface PollScanPersistenceInput {
   processedMessages: ProcessedMessageMetadata[];
 }
 
+export interface GroupSyncStatus {
+  groupId: string;
+  messagesProcessed: number;
+  oldestProcessedTimestamp: number | null;
+  newestProcessedTimestamp: number | null;
+  lastSyncAt: number | null;
+}
+
+export interface LocalGroup extends Group {
+  pollCount: number;
+  lastSyncAt: number | null;
+}
+
+export type IncrementalSyncDirection = 'newer' | 'older';
+
+export interface IncrementalSyncResult {
+  direction: IncrementalSyncDirection;
+  messagesLoaded: number;
+  newMessages: number;
+  knownMessages: number;
+  messagesPersisted: number;
+  pollsFound: number;
+  pollsPersisted: number;
+  votesReconciled: number;
+  oldestProcessedTimestamp: number | null;
+  newestProcessedTimestamp: number | null;
+  reachedBoundary: boolean;
+  boundaryNotFound: boolean;
+  reachedAvailableHistoryStart: boolean;
+  cancelled: boolean;
+  timedOut: boolean;
+}
+
 export interface PollParticipant {
   userId: string;
   name: string;
@@ -252,6 +285,11 @@ export interface StatsResult {
   minimumPairSample: number;
   minimumBehaviorParticipationRate: number;
   statsTimezone: string;
+}
+
+export interface PersistedStatsResult {
+  stats: StatsResult;
+  localData: GroupSyncStatus;
 }
 
 export interface TimingLeader extends MemberIdentity {

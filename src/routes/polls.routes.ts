@@ -6,6 +6,7 @@ import type { AnalysisState } from './whatsapp.routes';
 import {
   validateGroupId,
   validateHistoryPrepare,
+  validateOlderSync,
   validatePoll,
   validatePollScan
 } from './validation';
@@ -58,6 +59,53 @@ export function createPollsRouter(
       if (validation.error) return response.status(400).json({ error: validation.error });
       response.set('Cache-Control', 'no-store');
       return response.json(await history.getGroupHistoryStatus(validation.value));
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/groups/:groupId/sync-status', (request, response, next) => {
+    try {
+      const validation = validateGroupId(request.params.groupId);
+      if (validation.error) return response.status(400).json({ error: validation.error });
+      response.set('Cache-Control', 'no-store');
+      return response.json(history.getGroupSyncStatus(validation.value));
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/groups/:groupId/sync/newer', async (request, response, next) => {
+    try {
+      const validation = validateGroupId(request.params.groupId);
+      if (validation.error) return response.status(400).json({ error: validation.error });
+      response.set('Cache-Control', 'no-store');
+      return response.json(await history.syncNewerMessages(validation.value));
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/groups/:groupId/sync/older', async (request, response, next) => {
+    try {
+      const validation = validateOlderSync(request.params.groupId, request.body);
+      if (validation.error) return response.status(400).json({ error: validation.error });
+      response.set('Cache-Control', 'no-store');
+      return response.json(await history.syncOlderMessages(
+        validation.value.groupId,
+        validation.value.limit
+      ));
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.delete('/groups/:groupId/sync', (request, response, next) => {
+    try {
+      const validation = validateGroupId(request.params.groupId);
+      if (validation.error) return response.status(400).json({ error: validation.error });
+      response.set('Cache-Control', 'no-store');
+      return response.json(history.cancelIncrementalSync(validation.value));
     } catch (error) {
       return next(error);
     }
