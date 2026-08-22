@@ -26,6 +26,12 @@ npm-debug.log*
 *.log
 logs/
 
+# Banco SQLite local — nunca versionar
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
 # Editores e sistema operacional
 .idea/
 .vscode/

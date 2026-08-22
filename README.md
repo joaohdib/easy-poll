@@ -20,6 +20,17 @@ Abra [http://localhost:3000](http://localhost:3000). Para verificar e compilar o
 backend TypeScript, use `npm run typecheck` e `npm run build`. Depois do build,
 `npm start` executa a saída compilada sem reinicialização automática.
 
+## Banco de dados local
+
+O EasyPoll possui a infraestrutura local de persistência com SQLite,
+`better-sqlite3` e Drizzle ORM. O banco padrão fica em `data/easypoll.db`; a
+pasta é criada automaticamente e os arquivos SQLite são ignorados pelo Git.
+
+Nesta fase, nenhuma tabela de domínio foi criada e nenhum dado do WhatsApp é
+persistido. O schema, as migrations e a persistência real serão implementados
+nas próximas fases. O arquivo permanece somente na máquina em que o EasyPoll é
+executado.
+
 ## Como conectar
 
 1. Aguarde o QR Code aparecer na página.
@@ -65,7 +76,7 @@ contagens reais e nunca afirma que o histórico está completo. Veja o
 
 ## Limitações e aviso importante
 
-- Este MVP não possui login próprio, banco de dados, deploy ou suporte a múltiplas contas.
+- Este MVP não possui login próprio, persistência de dados do domínio, deploy ou suporte a múltiplas contas.
 - A sessão fica armazenada localmente e qualquer pessoa com acesso à máquina poderá abrir a interface enquanto o servidor estiver ativo.
 - O QR Code não é salvo pela aplicação.
 - Fotos são carregadas sob demanda, com concorrência limitada, e não são baixadas para disco. Quando indisponíveis, a interface usa iniciais.

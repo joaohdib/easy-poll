@@ -1,5 +1,6 @@
 import path from 'node:path';
 import express, { type ErrorRequestHandler } from 'express';
+import { closeDatabase, initializeDatabase } from './db';
 import type { PollAnalysisInput } from './domain/types';
 import { createGroupsRouter } from './routes/groups.routes';
 import { createPollsRouter } from './routes/polls.routes';
@@ -16,6 +17,8 @@ import { WhatsAppService } from './services/whatsapp.service';
 interface CodedError extends Error {
   code?: string;
 }
+
+initializeLocalDatabase();
 
 const app = express();
 const whatsapp = new WhatsAppService();
@@ -74,7 +77,11 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true;
   console.log(`\nRecebido ${signal}. Encerrando...`);
   server.close();
-  await whatsapp.shutdown();
+  try {
+    await whatsapp.shutdown();
+  } finally {
+    closeDatabase();
+  }
   process.exit(0);
 }
 
@@ -83,6 +90,17 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 function toCodedError(error: unknown): CodedError {
   return error instanceof Error ? error as CodedError : new Error(String(error));
+}
+
+function initializeLocalDatabase(): void {
+  try {
+    initializeDatabase();
+    console.log('[Database] SQLite local disponível em data/easypoll.db');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Database] Falha ao inicializar o SQLite local: ${message}`);
+    throw error;
+  }
 }
 
 export {
